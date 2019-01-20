@@ -1,0 +1,123 @@
+<html>
+	<head>
+		<title>RemoteHWInfo</title>
+	</head>
+	<body>
+		<script>
+			function AddCommas(str) 
+			{
+				return str.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+			}
+			
+			var xmlHttp = new XMLHttpRequest();
+			
+			xmlHttp.open('GET', '/json.json', true);
+			
+			xmlHttp.onreadystatechange = function()
+			{
+				if ((this.readyState == 4) && (this.status == 200))
+				{
+					var json = JSON.parse(this.responseText);
+					
+					if (json.hasOwnProperty('hwinfo'))
+					{
+						var html = '<table><tr><td><b>HWiNFO</b></td></tr>';
+						html += '<col width="450px"/><col width="150px"/><col width="150px"/><col width="150px"/><col width="150px"/>';
+						html += '<tr><th align="left">Sensor</th>';
+						html += '<th align="right">Current</th>';
+						html += '<th align="right">Minimum</th>';
+						html += '<th align="right">Maximum</th>';
+						html += '<th align="right">Average</th></tr>';
+					
+						var sensorIndex = -1;
+					
+						for (var i = 0; i < json.hwinfo.readings.length; ++i)
+						{
+							if (sensorIndex != parseInt(json.hwinfo.readings[i].sensorIndex))
+							{
+								sensorIndex = parseInt(json.hwinfo.readings[i].sensorIndex);
+								
+								var entryIndexBase = 0;
+								
+								for (var j = 0; j < json.hwinfo.sensors.length; ++j)
+								{
+									if ((parseInt(json.hwinfo.sensors[j].entryIndex) + entryIndexBase) == sensorIndex)
+									{
+										html += '<tr><td colspan="5"><b>' + json.hwinfo.sensors[j].sensorNameUser + '</b></td></tr>';
+										
+										break;
+									}
+								}
+							}
+							
+							var digits = 0;
+							
+							switch (json.hwinfo.readings[i].unit)
+							{
+								case 'MHz':
+								case 'GT/s':
+								case '°C':
+								case '%':
+								
+									digits = 1;
+									
+									break;
+									
+								case 'V':
+								case 'A':
+								case 'W':
+								case 'KB/s':
+								case 'MB/s':
+								
+									digits = 3;
+									
+									break;
+							}
+							
+							html += '<tr><td align="left">' + json.hwinfo.readings[i].labelUser + '</td>';
+							html += '<td align="right">';
+							
+							if (json.hwinfo.readings[i].unit == 'Yes/No')
+								html += ((parseFloat(json.hwinfo.readings[i].value) == 0) ? 'No' : 'Yes');
+							else
+								html += AddCommas(parseFloat(json.hwinfo.readings[i].value).toFixed(digits)) + ' ' + json.hwinfo.readings[i].unit;
+								
+							html += '</td>';
+							html += '<td align="right">';
+							
+							if (json.hwinfo.readings[i].unit == 'Yes/No')
+								html += ((parseFloat(json.hwinfo.readings[i].valueMin) == 0) ? 'No' : 'Yes');
+							else
+								html += AddCommas(parseFloat(json.hwinfo.readings[i].valueMin).toFixed(digits)) + ' ' + json.hwinfo.readings[i].unit;
+								
+							html += '</td>';
+							html += '<td align="right">';
+							
+							if (json.hwinfo.readings[i].unit == 'Yes/No')
+								html += ((parseFloat(json.hwinfo.readings[i].valueMax) == 0) ? 'No' : 'Yes');
+							else
+								html += AddCommas(parseFloat(json.hwinfo.readings[i].valueMax).toFixed(digits)) + ' ' + json.hwinfo.readings[i].unit;
+								
+							html += '</td>';
+							html += '<td align="right">';
+							
+							if (json.hwinfo.readings[i].unit == 'Yes/No')
+								html += ((parseFloat(json.hwinfo.readings[i].valueAvg) == 0) ? 'No' : 'Yes');
+							else
+								html += AddCommas(parseFloat(json.hwinfo.readings[i].valueAvg).toFixed(digits)) + ' ' + json.hwinfo.readings[i].unit;
+								
+							html += '</td></tr>';
+						}
+						
+						html += '</table>';
+						
+						document.getElementById("hwinfo").innerHTML = html;
+					}
+				}
+			};
+				
+			xmlHttp.send();
+			</script>
+		<div id="hwinfo"></div>
+	</body>
+</html>
