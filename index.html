@@ -3,6 +3,9 @@
 		<title>RemoteHWInfo</title>
 	</head>
 	<body>
+		<div id="hwinfo"></div>
+		<div id="gpuz"></div>
+		<div id="afterburner"></div>
 		<script>
 			function AddCommas(str) 
 			{
@@ -113,11 +116,69 @@
 						
 						document.getElementById("hwinfo").innerHTML = html;
 					}
-				}
+				
+					if (json.hasOwnProperty('gpuz'))
+					{
+						var html = '<br><table><tr><td><b>GPU-Z</b></td></tr>';
+						html += '<col width="300px"/><col width="300px"/>';
+						html += '<tr><th align="left">Sensor</th>';
+						html += '<th align="right">Value</th></tr>';
+						
+						for (var i = 0; i < json.gpuz.data.length; ++i)
+							html += '<tr><td align="left">' + json.gpuz.data[i].key + '</td><td align="right">' + json.gpuz.data[i].value + '</td></tr>';
+							
+						for (var i = 0; i < json.gpuz.sensors.length; ++i)
+						{
+							if (json.gpuz.sensors[i].unit == '%%')
+								json.gpuz.sensors[i].unit = '%';
+								
+							html += '<tr><td align="left">' + json.gpuz.sensors[i].name + '</td>';
+							html += '<td align="right">';
+							html += parseFloat(json.gpuz.sensors[i].value).toFixed(json.gpuz.sensors[i].digits) + ' ' + json.gpuz.sensors[i].unit + '</td></tr>';
+						}
+							
+						html += '</table>';
+							
+						document.getElementById("gpuz").innerHTML = html;
+					}
+					
+					if (json.hasOwnProperty('afterburner'))
+					{
+						var html = '<br><table><tr><td><b>MSI Afterburner</b></td></tr>';
+						html += '<col width="450px"/><col width="150px"/><col width="150px"/><col width="150px"/>';
+						html += '<tr><th align="left">Sensor</th>';
+						html += '<th align="right">Data</th>';
+						html += '<th align="right">Min Limit</th>';
+						html += '<th align="right">Max Limit</th></tr>';
+							
+						for (var i = 0; i < json.afterburner.entries.length; ++i)
+						{
+							html += '<tr><td align="left">' + json.afterburner.entries[i].localName + '</td>';
+							
+							if ((parseFloat(json.afterburner.entries[i].data) > 3.4e+38) || (parseFloat(json.afterburner.entries[i].data) < 1.1e-38))
+								json.afterburner.entries[i].data = 0;
+							
+							html += '<td align="right">';
+							html += parseFloat(json.afterburner.entries[i].data).toFixed(json.afterburner.entries[i].digits) + ' ' + json.afterburner.entries[i].localUnits;
+							html += '</td>';
+								
+							html += '<td align="right">';
+							html += parseFloat(json.afterburner.entries[i].minLimit).toFixed(json.afterburner.entries[i].digits) + ' ' + json.afterburner.entries[i].localUnits;
+							html += '</td>';
+								
+							html += '<td align="right">';
+							html += parseFloat(json.afterburner.entries[i].maxLimit).toFixed(json.afterburner.entries[i].digits) + ' ' + json.afterburner.entries[i].localUnits;
+							html += '</td></tr>';
+						}
+							
+						html += '</table>';
+							
+						document.getElementById("afterburner").innerHTML = html;
+					}
+				}				
 			};
 				
 			xmlHttp.send();
 			</script>
-		<div id="hwinfo"></div>
 	</body>
 </html>

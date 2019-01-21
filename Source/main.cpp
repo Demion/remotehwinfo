@@ -50,7 +50,57 @@ struct HWINFO_SENSORS_SHARED_MEM2
 	unsigned int readingCount;
 };
 
+struct GPUZ_RECORD
+{
+	wchar_t key[256];
+	wchar_t value[256];
+};
+
+struct GPUZ_SENSOR_RECORD
+{
+	wchar_t name[256];
+	wchar_t unit[8];
+	unsigned int digits;
+	double value;
+};
+
+struct GPUZ_SH_MEM
+{
+	unsigned int version;
+	volatile int busy;
+	unsigned int lastUpdate;
+	GPUZ_RECORD data[128];
+	GPUZ_SENSOR_RECORD sensors[128];
+};
+
+struct MAHM_SHARED_MEMORY_ENTRY
+{
+	char name[MAX_PATH];
+	char units[MAX_PATH];
+	char localName[MAX_PATH];
+	char localUnits[MAX_PATH];
+	char format[MAX_PATH];
+	float data;
+	float minLimit;
+	float maxLimit;
+	unsigned int flags;
+};
+
+struct MAHM_SHARED_MEMORY_HEADER
+{
+	unsigned int signature;
+	unsigned int version;
+	unsigned int headerSize;
+	unsigned int entryCount;
+	unsigned int entrySize;
+	int time;
+};
+
 #pragma pack(pop)
+
+#define	MAHM_SHARED_MEMORY_ENTRY_FLAG_SHOW_IN_OSD  0x00000001
+#define	MAHM_SHARED_MEMORY_ENTRY_FLAG_SHOW_IN_LCD  0x00000002
+#define	MAHM_SHARED_MEMORY_ENTRY_FLAG_SHOW_IN_TRAY 0x00000004
 
 enum class HwinfoReadingType
 {
@@ -106,7 +156,7 @@ bool EntryEnabled[EntryTotalCount] = {0};
 
 unsigned int Port = 60000;
 
-bool Hwinfo = true;
+bool Hwinfo = true, Gpuz = true, Afterburner = true;
 
 #define LOG(expression) Log(#expression, strrchr(__FILE__, '\\') + 1, __LINE__, (intptr_t) (expression))
 
@@ -217,6 +267,28 @@ char* FormatSpecialChar(char *str)
 	return str;
 }
 
+wchar_t* FormatSpecialCharUnicode(wchar_t *str)
+{
+	size_t length = wcslen(str);
+
+	for (unsigned int i = 0; i < length; ++i)
+	{
+		if ((str[i] == L'\\') || (str[i] == L'\"'))
+		{
+			for (size_t j = length; j > i; --j)
+				str[j] = str[j - 1];
+
+			str[i++] = L'\\';
+
+			++length;
+		}
+	}
+
+	str[length] = L'\0';
+
+	return str;
+}
+
 bool GetHwinfo(HWINFO_SENSORS_SHARED_MEM2 *hwinfo, void **sensors, void **readings)
 {
 	bool result = false;
@@ -243,13 +315,9 @@ bool GetHwinfo(HWINFO_SENSORS_SHARED_MEM2 *hwinfo, void **sensors, void **readin
 				LOG(*sensors = malloc(hwinfo->sensorSize * hwinfo->sensorCount));
 
 				if (*sensors)
-				{
 					memcpy(*sensors, (unsigned char*) mapAddress + hwinfo->sensorOffset, hwinfo->sensorSize * hwinfo->sensorCount);
-				}
 				else
-				{
 					result = false;
-				}
 			}
 
 			if (result)
@@ -270,6 +338,76 @@ bool GetHwinfo(HWINFO_SENSORS_SHARED_MEM2 *hwinfo, void **sensors, void **readin
 						result = false;
 					}
 				}
+			}
+
+			LOG(UnmapViewOfFile(mapAddress));
+		}
+
+		LOG(CloseHandle(mapFile));
+	}
+
+	return result;
+}
+
+bool GetGpuz(GPUZ_SH_MEM *gpuz)
+{
+	bool result = false;
+
+	HANDLE mapFile = 0;
+
+	LOG(mapFile = OpenFileMappingA(FILE_MAP_READ, false, "GPUZShMem"));
+
+	if (mapFile)
+	{
+		void *mapAddress = 0;
+
+		LOG(mapAddress = MapViewOfFile(mapFile, FILE_MAP_READ, 0, 0, 0));
+
+		if (mapAddress)
+		{
+			if (gpuz)
+				memcpy(gpuz, mapAddress, sizeof(GPUZ_SH_MEM));
+
+			result = true;
+
+			LOG(UnmapViewOfFile(mapAddress));
+		}
+
+		LOG(CloseHandle(mapFile));
+	}
+
+	return result;
+}
+
+bool GetAfterburner(MAHM_SHARED_MEMORY_HEADER *afterburner, void **entries)
+{
+	bool result = false;
+
+	HANDLE mapFile = 0;
+
+	LOG(mapFile = OpenFileMappingA(FILE_MAP_READ, false, "MAHMSharedMemory"));
+
+	if (mapFile)
+	{
+		void *mapAddress = 0;
+
+		LOG(mapAddress = MapViewOfFile(mapFile, FILE_MAP_READ, 0, 0, 0));
+
+		if (mapAddress)
+		{
+			if (afterburner)
+				memcpy(afterburner, mapAddress, sizeof(MAHM_SHARED_MEMORY_HEADER));
+
+			result = true;
+
+			if (entries)
+			{
+				LOG(*entries = malloc(afterburner->entrySize * afterburner->entryCount));
+
+				if (*entries)
+					memcpy(*entries, (unsigned char*) mapAddress + afterburner->headerSize, afterburner->entrySize * afterburner->entryCount);
+				else
+					result = false;
 			}
 
 			LOG(UnmapViewOfFile(mapAddress));
@@ -466,6 +604,176 @@ size_t CreateJson(char **jsonData)
 		}
 	}
 
+	if (Gpuz)
+	{
+		GPUZ_SH_MEM gpuz = {0};
+
+		if (GetGpuz(&gpuz))
+		{
+			swprintf(json + wcslen(json),
+					 ",\n"
+					 L"\t\"gpuz\":\n"
+					 L"\t{\n"
+					 L"\t\t\"version\": %d,\n"
+					 L"\t\t\"busy\": %d,\n"
+					 L"\t\t\"lastUpdate\": %d,\n"
+					 L"\t\t\"data\":\n"
+					 L"\t\t[",
+					 gpuz.version,
+					 gpuz.busy,
+					 gpuz.lastUpdate);
+
+			first = true;
+
+			for (unsigned int i = 0; i < 128; ++i)
+			{
+				if (wcslen(gpuz.data[i].key) > 0)
+				{
+					if (EntryEnabled[entryIndex])
+					{
+						swprintf(json + wcslen(json),
+								 L"%hs\n"
+								 L"\t\t\t{\n"
+								 L"\t\t\t\t\"entryIndex\": %d,\n"
+								 L"\t\t\t\t\"key\": \"%s\",\n"
+								 L"\t\t\t\t\"value\": \"%s\"\n"
+								 L"\t\t\t}",
+								 first ? "" : ",",
+								 entryIndex,
+								 FormatSpecialCharUnicode(gpuz.data[i].key),
+								 FormatSpecialCharUnicode(gpuz.data[i].value));
+
+						first = false;
+					}
+
+					++entryIndex;
+				}
+			}
+
+			swprintf(json + wcslen(json),
+					 L"\n"
+					 L"\t\t],\n"
+					 L"\t\t\"sensors\":\n"
+					 L"\t\t[");
+
+			first = true;
+
+			for (unsigned int i = 0; i < 128; ++i)
+			{
+				if (wcslen(gpuz.sensors[i].name) > 0)
+				{
+					if (EntryEnabled[entryIndex])
+					{
+						swprintf(json + wcslen(json),
+								 L"%hs\n"
+								 L"\t\t\t{\n"
+								 L"\t\t\t\t\"entryIndex\": %d,\n"
+								 L"\t\t\t\t\"name\": \"%s\",\n"
+								 L"\t\t\t\t\"unit\": \"%s\",\n"
+								 L"\t\t\t\t\"digits\": %d,\n"
+								 L"\t\t\t\t\"value\": %lf\n"
+								 L"\t\t\t}",
+								 first ? "" : ",",
+								 entryIndex,
+								 FormatSpecialCharUnicode(gpuz.sensors[i].name),
+								 FormatSpecialCharUnicode(gpuz.sensors[i].unit),
+								 gpuz.sensors[i].digits,
+								 gpuz.sensors[i].value);
+
+						first = false;
+					}
+
+					++entryIndex;
+				}
+			}
+
+			swprintf(json + wcslen(json),
+					 L"\n"
+					 L"\t\t]\n"
+					 L"\t}");
+		}
+	}
+
+	if (Afterburner)
+	{
+		MAHM_SHARED_MEMORY_HEADER afterburner = {0};
+
+		void *entries = 0;
+
+		if (GetAfterburner(&afterburner, &entries))
+		{
+			swprintf(json + wcslen(json),
+					 ",\n"
+					 L"\t\"afterburner\":\n"
+					 L"\t{\n"
+					 L"\t\t\"signature\": %d,\n"
+					 L"\t\t\"version\": %d,\n"
+					 L"\t\t\"headerSize\": %d,\n"
+					 L"\t\t\"entryCount\": %d,\n"
+					 L"\t\t\"entrySize\": %d,\n"
+					 L"\t\t\"time\": %d,\n"
+					 L"\t\t\"entries\":\n"
+					 L"\t\t[",
+					 afterburner.signature,
+					 afterburner.version,
+					 afterburner.headerSize,
+					 afterburner.entryCount,
+					 afterburner.entrySize,
+					 afterburner.time);
+
+			first = true;
+
+			for (unsigned int i = 0; i < afterburner.entryCount; ++i)
+			{
+				MAHM_SHARED_MEMORY_ENTRY *entry = (MAHM_SHARED_MEMORY_ENTRY*) ((unsigned char*) entries + afterburner.entrySize * i);
+
+				if (EntryEnabled[entryIndex])
+				{
+					entry->format[strlen(entry->format)] = 0;
+
+					unsigned int digits = atoi(entry->format + 2);
+
+					swprintf(json + wcslen(json),
+							 L"%hs\n"
+							 L"\t\t\t{\n"
+							 L"\t\t\t\t\"entryIndex\": %d,\n"
+							 L"\t\t\t\t\"name\": \"%hs\",\n"
+							 L"\t\t\t\t\"units\": \"%hs\",\n"
+							 L"\t\t\t\t\"localName\": \"%hs\",\n"
+							 L"\t\t\t\t\"localUnits\": \"%hs\",\n"
+							 L"\t\t\t\t\"digits\": %d,\n"
+							 L"\t\t\t\t\"data\": %f,\n"
+							 L"\t\t\t\t\"minLimit\": %f,\n"
+							 L"\t\t\t\t\"maxLimit\": %f,\n"
+							 L"\t\t\t\t\"flags\": %d\n"
+							 L"\t\t\t}",
+							 first ? "" : ",",
+							 entryIndex,
+							 FormatSpecialChar(entry->name),
+							 FormatSpecialChar(entry->units),
+							 FormatSpecialChar(entry->localName),
+							 FormatSpecialChar(entry->localUnits),
+							 digits,
+							 entry->data,
+							 entry->minLimit,
+							 entry->maxLimit,
+							 entry->flags);
+
+					first = false;
+				}
+
+				++entryIndex;
+			}
+
+			swprintf(json + wcslen(json),
+					 L"\n"
+					 L"\t\t]\n"
+					 L"\t}");
+
+			free(entries);
+		}
+	}
+
 	swprintf(json + wcslen(json), L"\n}");
 
 	return UnicodeToUtf8(json, jsonData);
@@ -634,6 +942,8 @@ void PrintUsage()
 		"Usage:\n"
 		"-port (60000 = default)\n"
 		"-hwinfo (0 = disable 1 = enable = default)\n"
+		"-gpuz (0 = disable 1 = enable = default)\n"
+		"-afterburner (0 = disable 1 = enable = default)\n"
 		"-help\n"
 		"\n"
 		"http://ip:port/json.json (UTF-8)\n"
@@ -659,9 +969,19 @@ void ParseArgs(int argc, char *argv[])
 			if (arg + 1 < argc)
 				Hwinfo = (atoi(argv[++arg]) != 0);
 		}
+		else if (strcmp(strupr(argv[arg]), "-GPUZ") == 0)
+		{
+			if (arg + 1 < argc)
+				Gpuz = (atoi(argv[++arg]) != 0);
+		}
+		else if (strcmp(strupr(argv[arg]), "-AFTERBURNER") == 0)
+		{
+			if (arg + 1 < argc)
+				Afterburner = (atoi(argv[++arg]) != 0);
+		}
 		else if (strcmp(strupr(argv[arg]), "-HELP") == 0)
 		{
-			Hwinfo = false;
+			Hwinfo = Gpuz = Afterburner = false;
 
 			PrintUsage();
 		}
@@ -677,7 +997,7 @@ int main(int argc, char *argv[])
 	if (argc > 1)
 		ParseArgs(argc, argv);
 
-	if (Hwinfo)
+	if ((Hwinfo) || (Gpuz) || (Afterburner))
 		CreateServer();
 
 	if (LogFile)
