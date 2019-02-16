@@ -473,393 +473,413 @@ void ParseParams(const char *buffer)
 
 size_t CreateJson(char **jsonData)
 {
-	wchar_t json[100000];
+	size_t utf8Size = 0;
 
-	int entryIndex = 0;
+	wchar_t *json = 0;
+	
+	LOG(json = (wchar_t*) malloc(1000000 * sizeof(wchar_t)));
 
-	bool first = false;
-
-	swprintf(json, L"{\n");
-
-	if (Hwinfo)
+	if (json)
 	{
-		HWINFO_SENSORS_SHARED_MEM2 hwinfo = {0};
+		int entryIndex = 0;
 
-		void *sensors = 0;
-		void *readings = 0;
+		bool first = false;
 
-		if (GetHwinfo(&hwinfo, &sensors, &readings))
+		swprintf(json, L"{\n");
+
+		if (Hwinfo)
 		{
-			swprintf(json + wcslen(json),
-					 L"\t\"hwinfo\":\n"
-					 L"\t{\n"
-					 L"\t\t\"signature\": %d,\n"
-					 L"\t\t\"version\": %d,\n"
-					 L"\t\t\"revision\": %d,\n"
-					 L"\t\t\"pollTime\": %lld,\n"
-					 L"\t\t\"sensorOffset\": %d,\n"
-					 L"\t\t\"sensorSize\": %d,\n"
-					 L"\t\t\"sensorCount\": %d,\n"
-					 L"\t\t\"readingOffset\": %d,\n"
-					 L"\t\t\"readingSize\": %d,\n"
-					 L"\t\t\"readingCount\": %d,\n"
-					 L"\t\t\"sensors\":\n"
-					 L"\t\t[",
-					 hwinfo.signature,
-					 hwinfo.version,
-					 hwinfo.revision,
-					 hwinfo.pollTime,
-					 hwinfo.sensorOffset,
-					 hwinfo.sensorSize,
-					 hwinfo.sensorCount,
-					 hwinfo.readingOffset,
-					 hwinfo.readingSize,
-					 hwinfo.readingCount);
+			HWINFO_SENSORS_SHARED_MEM2 hwinfo = {0};
 
-			first = true;
+			void *sensors = 0;
+			void *readings = 0;
 
-			for (unsigned int i = 0; i < hwinfo.sensorCount; ++i)
+			if (GetHwinfo(&hwinfo, &sensors, &readings))
 			{
-				HWINFO_SENSORS_SENSOR *sensor = (HWINFO_SENSORS_SENSOR*) ((unsigned char*) sensors + hwinfo.sensorSize * i);
+				swprintf(json + wcslen(json),
+						 L"\t\"hwinfo\":\n"
+						 L"\t{\n"
+						 L"\t\t\"signature\": %d,\n"
+						 L"\t\t\"version\": %d,\n"
+						 L"\t\t\"revision\": %d,\n"
+						 L"\t\t\"pollTime\": %lld,\n"
+						 L"\t\t\"sensorOffset\": %d,\n"
+						 L"\t\t\"sensorSize\": %d,\n"
+						 L"\t\t\"sensorCount\": %d,\n"
+						 L"\t\t\"readingOffset\": %d,\n"
+						 L"\t\t\"readingSize\": %d,\n"
+						 L"\t\t\"readingCount\": %d,\n"
+						 L"\t\t\"sensors\":\n"
+						 L"\t\t[",
+						 hwinfo.signature,
+						 hwinfo.version,
+						 hwinfo.revision,
+						 hwinfo.pollTime,
+						 hwinfo.sensorOffset,
+						 hwinfo.sensorSize,
+						 hwinfo.sensorCount,
+						 hwinfo.readingOffset,
+						 hwinfo.readingSize,
+						 hwinfo.readingCount);
 
-				if (EntryEnabled[entryIndex])
+				first = true;
+
+				for (unsigned int i = 0; i < hwinfo.sensorCount; ++i)
 				{
-					swprintf(json + wcslen(json),
-							 L"%hs\n"
-							 L"\t\t\t{\n"
-							 L"\t\t\t\t\"entryIndex\": %d,\n"
-							 L"\t\t\t\t\"sensorId\": %u,\n"
-							 L"\t\t\t\t\"sensorInst\": %d,\n"
-							 L"\t\t\t\t\"sensorNameOriginal\": \"%hs\",\n"
-							 L"\t\t\t\t\"sensorNameUser\": \"%hs\"\n"
-							 L"\t\t\t}",
-							 first ? "" : ",",
-							 entryIndex,
-							 sensor->sensorId,
-							 sensor->sensorInst,
-							 FormatSpecialChar(sensor->sensorNameOriginal),
-							 FormatSpecialChar(sensor->sensorNameUser));
+					HWINFO_SENSORS_SENSOR *sensor = (HWINFO_SENSORS_SENSOR*) ((unsigned char*) sensors + hwinfo.sensorSize * i);
 
-					first = false;
-				}
-
-				++entryIndex;
-			}
-
-			swprintf(json + wcslen(json),
-					 L"\n"
-					 L"\t\t],\n"
-					 L"\t\t\"readings\":\n"
-					 L"\t\t[");
-
-			first = true;
-
-			for (unsigned int i = 0; i < hwinfo.readingCount; ++i)
-			{
-				HWINFO_SENSORS_READING *reading = (HWINFO_SENSORS_READING*) ((unsigned char*) readings + hwinfo.readingSize * i);
-
-				if (EntryEnabled[entryIndex])
-				{
-					swprintf(json + wcslen(json),
-							 L"%hs\n"
-							 L"\t\t\t{\n"
-							 L"\t\t\t\t\"entryIndex\": %d,\n"
-							 L"\t\t\t\t\"readingType\": %d,\n"
-							 L"\t\t\t\t\"sensorIndex\": %d,\n"
-							 L"\t\t\t\t\"readingId\": %u,\n"
-							 L"\t\t\t\t\"labelOriginal\": \"%hs\",\n"
-							 L"\t\t\t\t\"labelUser\": \"%hs\",\n"
-							 L"\t\t\t\t\"unit\": \"%hs\",\n"
-							 L"\t\t\t\t\"value\": %lf,\n"
-							 L"\t\t\t\t\"valueMin\": %lf,\n"
-							 L"\t\t\t\t\"valueMax\": %lf,\n"
-							 L"\t\t\t\t\"valueAvg\": %lf\n"
-							 L"\t\t\t}",
-							 first ? "" : ",",
-							 entryIndex,
-							 reading->readingType,
-							 reading->sensorIndex,
-							 reading->readingId,
-							 FormatSpecialChar(reading->labelOriginal),
-							 FormatSpecialChar(reading->labelUser),
-							 FormatSpecialChar(reading->unit),
-							 reading->value,
-							 reading->valueMin,
-							 reading->valueMax,
-							 reading->valueAvg);
-
-					first = false;
-				}
-
-				++entryIndex;
-			}
-
-			swprintf(json + wcslen(json),
-					 L"\n"
-					 L"\t\t]\n"
-					 L"\t}");
-
-			free(sensors);
-			free(readings);
-		}
-	}
-
-	if (Gpuz)
-	{
-		GPUZ_SH_MEM gpuz = {0};
-
-		if (GetGpuz(&gpuz))
-		{
-			swprintf(json + wcslen(json),
-					 ",\n"
-					 L"\t\"gpuz\":\n"
-					 L"\t{\n"
-					 L"\t\t\"version\": %d,\n"
-					 L"\t\t\"busy\": %d,\n"
-					 L"\t\t\"lastUpdate\": %d,\n"
-					 L"\t\t\"data\":\n"
-					 L"\t\t[",
-					 gpuz.version,
-					 gpuz.busy,
-					 gpuz.lastUpdate);
-
-			first = true;
-
-			for (unsigned int i = 0; i < 128; ++i)
-			{
-				if (wcslen(gpuz.data[i].key) > 0)
-				{
 					if (EntryEnabled[entryIndex])
 					{
 						swprintf(json + wcslen(json),
 								 L"%hs\n"
 								 L"\t\t\t{\n"
 								 L"\t\t\t\t\"entryIndex\": %d,\n"
-								 L"\t\t\t\t\"key\": \"%s\",\n"
-								 L"\t\t\t\t\"value\": \"%s\"\n"
+								 L"\t\t\t\t\"sensorId\": %u,\n"
+								 L"\t\t\t\t\"sensorInst\": %d,\n"
+								 L"\t\t\t\t\"sensorNameOriginal\": \"%hs\",\n"
+								 L"\t\t\t\t\"sensorNameUser\": \"%hs\"\n"
 								 L"\t\t\t}",
 								 first ? "" : ",",
 								 entryIndex,
-								 FormatSpecialCharUnicode(gpuz.data[i].key),
-								 FormatSpecialCharUnicode(gpuz.data[i].value));
+								 sensor->sensorId,
+								 sensor->sensorInst,
+								 FormatSpecialChar(sensor->sensorNameOriginal),
+								 FormatSpecialChar(sensor->sensorNameUser));
 
 						first = false;
 					}
 
 					++entryIndex;
 				}
-			}
 
-			swprintf(json + wcslen(json),
-					 L"\n"
-					 L"\t\t],\n"
-					 L"\t\t\"sensors\":\n"
-					 L"\t\t[");
+				swprintf(json + wcslen(json),
+						 L"\n"
+						 L"\t\t],\n"
+						 L"\t\t\"readings\":\n"
+						 L"\t\t[");
 
-			first = true;
+				first = true;
 
-			for (unsigned int i = 0; i < 128; ++i)
-			{
-				if (wcslen(gpuz.sensors[i].name) > 0)
+				for (unsigned int i = 0; i < hwinfo.readingCount; ++i)
 				{
+					HWINFO_SENSORS_READING *reading = (HWINFO_SENSORS_READING*) ((unsigned char*) readings + hwinfo.readingSize * i);
+
 					if (EntryEnabled[entryIndex])
 					{
 						swprintf(json + wcslen(json),
 								 L"%hs\n"
 								 L"\t\t\t{\n"
 								 L"\t\t\t\t\"entryIndex\": %d,\n"
-								 L"\t\t\t\t\"name\": \"%s\",\n"
-								 L"\t\t\t\t\"unit\": \"%s\",\n"
+								 L"\t\t\t\t\"readingType\": %d,\n"
+								 L"\t\t\t\t\"sensorIndex\": %d,\n"
+								 L"\t\t\t\t\"readingId\": %u,\n"
+								 L"\t\t\t\t\"labelOriginal\": \"%hs\",\n"
+								 L"\t\t\t\t\"labelUser\": \"%hs\",\n"
+								 L"\t\t\t\t\"unit\": \"%hs\",\n"
+								 L"\t\t\t\t\"value\": %lf,\n"
+								 L"\t\t\t\t\"valueMin\": %lf,\n"
+								 L"\t\t\t\t\"valueMax\": %lf,\n"
+								 L"\t\t\t\t\"valueAvg\": %lf\n"
+								 L"\t\t\t}",
+								 first ? "" : ",",
+								 entryIndex,
+								 reading->readingType,
+								 reading->sensorIndex,
+								 reading->readingId,
+								 FormatSpecialChar(reading->labelOriginal),
+								 FormatSpecialChar(reading->labelUser),
+								 FormatSpecialChar(reading->unit),
+								 reading->value,
+								 reading->valueMin,
+								 reading->valueMax,
+								 reading->valueAvg);
+
+						first = false;
+					}
+
+					++entryIndex;
+				}
+
+				swprintf(json + wcslen(json),
+						 L"\n"
+						 L"\t\t]\n"
+						 L"\t}");
+
+				free(sensors);
+				free(readings);
+			}
+		}
+
+		if (Gpuz)
+		{
+			GPUZ_SH_MEM gpuz = {0};
+
+			if (GetGpuz(&gpuz))
+			{
+				swprintf(json + wcslen(json),
+						 ",\n"
+						 L"\t\"gpuz\":\n"
+						 L"\t{\n"
+						 L"\t\t\"version\": %d,\n"
+						 L"\t\t\"busy\": %d,\n"
+						 L"\t\t\"lastUpdate\": %d,\n"
+						 L"\t\t\"data\":\n"
+						 L"\t\t[",
+						 gpuz.version,
+						 gpuz.busy,
+						 gpuz.lastUpdate);
+
+				first = true;
+
+				for (unsigned int i = 0; i < 128; ++i)
+				{
+					if (wcslen(gpuz.data[i].key) > 0)
+					{
+						if (EntryEnabled[entryIndex])
+						{
+							swprintf(json + wcslen(json),
+									 L"%hs\n"
+									 L"\t\t\t{\n"
+									 L"\t\t\t\t\"entryIndex\": %d,\n"
+									 L"\t\t\t\t\"key\": \"%s\",\n"
+									 L"\t\t\t\t\"value\": \"%s\"\n"
+									 L"\t\t\t}",
+									 first ? "" : ",",
+									 entryIndex,
+									 FormatSpecialCharUnicode(gpuz.data[i].key),
+									 FormatSpecialCharUnicode(gpuz.data[i].value));
+
+							first = false;
+						}
+
+						++entryIndex;
+					}
+				}
+
+				swprintf(json + wcslen(json),
+						 L"\n"
+						 L"\t\t],\n"
+						 L"\t\t\"sensors\":\n"
+						 L"\t\t[");
+
+				first = true;
+
+				for (unsigned int i = 0; i < 128; ++i)
+				{
+					if (wcslen(gpuz.sensors[i].name) > 0)
+					{
+						if (EntryEnabled[entryIndex])
+						{
+							swprintf(json + wcslen(json),
+									 L"%hs\n"
+									 L"\t\t\t{\n"
+									 L"\t\t\t\t\"entryIndex\": %d,\n"
+									 L"\t\t\t\t\"name\": \"%s\",\n"
+									 L"\t\t\t\t\"unit\": \"%s\",\n"
+									 L"\t\t\t\t\"digits\": %d,\n"
+									 L"\t\t\t\t\"value\": %lf\n"
+									 L"\t\t\t}",
+									 first ? "" : ",",
+									 entryIndex,
+									 FormatSpecialCharUnicode(gpuz.sensors[i].name),
+									 FormatSpecialCharUnicode(gpuz.sensors[i].unit),
+									 gpuz.sensors[i].digits,
+									 gpuz.sensors[i].value);
+
+							first = false;
+						}
+
+						++entryIndex;
+					}
+				}
+
+				swprintf(json + wcslen(json),
+						 L"\n"
+						 L"\t\t]\n"
+						 L"\t}");
+			}
+		}
+
+		if (Afterburner)
+		{
+			MAHM_SHARED_MEMORY_HEADER afterburner = {0};
+
+			void *entries = 0;
+
+			if (GetAfterburner(&afterburner, &entries))
+			{
+				swprintf(json + wcslen(json),
+						 ",\n"
+						 L"\t\"afterburner\":\n"
+						 L"\t{\n"
+						 L"\t\t\"signature\": %d,\n"
+						 L"\t\t\"version\": %d,\n"
+						 L"\t\t\"headerSize\": %d,\n"
+						 L"\t\t\"entryCount\": %d,\n"
+						 L"\t\t\"entrySize\": %d,\n"
+						 L"\t\t\"time\": %d,\n"
+						 L"\t\t\"entries\":\n"
+						 L"\t\t[",
+						 afterburner.signature,
+						 afterburner.version,
+						 afterburner.headerSize,
+						 afterburner.entryCount,
+						 afterburner.entrySize,
+						 afterburner.time);
+
+				first = true;
+
+				for (unsigned int i = 0; i < afterburner.entryCount; ++i)
+				{
+					MAHM_SHARED_MEMORY_ENTRY *entry = (MAHM_SHARED_MEMORY_ENTRY*) ((unsigned char*) entries + afterburner.entrySize * i);
+
+					if (EntryEnabled[entryIndex])
+					{
+						entry->format[strlen(entry->format)] = 0;
+
+						unsigned int digits = atoi(entry->format + 2);
+
+						swprintf(json + wcslen(json),
+								 L"%hs\n"
+								 L"\t\t\t{\n"
+								 L"\t\t\t\t\"entryIndex\": %d,\n"
+								 L"\t\t\t\t\"name\": \"%hs\",\n"
+								 L"\t\t\t\t\"units\": \"%hs\",\n"
+								 L"\t\t\t\t\"localName\": \"%hs\",\n"
+								 L"\t\t\t\t\"localUnits\": \"%hs\",\n"
 								 L"\t\t\t\t\"digits\": %d,\n"
-								 L"\t\t\t\t\"value\": %lf\n"
+								 L"\t\t\t\t\"data\": %f,\n"
+								 L"\t\t\t\t\"minLimit\": %f,\n"
+								 L"\t\t\t\t\"maxLimit\": %f,\n"
+								 L"\t\t\t\t\"flags\": %d\n"
 								 L"\t\t\t}",
 								 first ? "" : ",",
 								 entryIndex,
-								 FormatSpecialCharUnicode(gpuz.sensors[i].name),
-								 FormatSpecialCharUnicode(gpuz.sensors[i].unit),
-								 gpuz.sensors[i].digits,
-								 gpuz.sensors[i].value);
+								 FormatSpecialChar(entry->name),
+								 FormatSpecialChar(entry->units),
+								 FormatSpecialChar(entry->localName),
+								 FormatSpecialChar(entry->localUnits),
+								 digits,
+								 entry->data,
+								 entry->minLimit,
+								 entry->maxLimit,
+								 entry->flags);
 
 						first = false;
 					}
 
 					++entryIndex;
 				}
-			}
 
-			swprintf(json + wcslen(json),
-					 L"\n"
-					 L"\t\t]\n"
-					 L"\t}");
+				swprintf(json + wcslen(json),
+						 L"\n"
+						 L"\t\t]\n"
+						 L"\t}");
+
+				free(entries);
+			}
 		}
+
+		swprintf(json + wcslen(json), L"\n}");
+
+		utf8Size = UnicodeToUtf8(json, jsonData);
+		
+		free(json);
 	}
 
-	if (Afterburner)
-	{
-		MAHM_SHARED_MEMORY_HEADER afterburner = {0};
-
-		void *entries = 0;
-
-		if (GetAfterburner(&afterburner, &entries))
-		{
-			swprintf(json + wcslen(json),
-					 ",\n"
-					 L"\t\"afterburner\":\n"
-					 L"\t{\n"
-					 L"\t\t\"signature\": %d,\n"
-					 L"\t\t\"version\": %d,\n"
-					 L"\t\t\"headerSize\": %d,\n"
-					 L"\t\t\"entryCount\": %d,\n"
-					 L"\t\t\"entrySize\": %d,\n"
-					 L"\t\t\"time\": %d,\n"
-					 L"\t\t\"entries\":\n"
-					 L"\t\t[",
-					 afterburner.signature,
-					 afterburner.version,
-					 afterburner.headerSize,
-					 afterburner.entryCount,
-					 afterburner.entrySize,
-					 afterburner.time);
-
-			first = true;
-
-			for (unsigned int i = 0; i < afterburner.entryCount; ++i)
-			{
-				MAHM_SHARED_MEMORY_ENTRY *entry = (MAHM_SHARED_MEMORY_ENTRY*) ((unsigned char*) entries + afterburner.entrySize * i);
-
-				if (EntryEnabled[entryIndex])
-				{
-					entry->format[strlen(entry->format)] = 0;
-
-					unsigned int digits = atoi(entry->format + 2);
-
-					swprintf(json + wcslen(json),
-							 L"%hs\n"
-							 L"\t\t\t{\n"
-							 L"\t\t\t\t\"entryIndex\": %d,\n"
-							 L"\t\t\t\t\"name\": \"%hs\",\n"
-							 L"\t\t\t\t\"units\": \"%hs\",\n"
-							 L"\t\t\t\t\"localName\": \"%hs\",\n"
-							 L"\t\t\t\t\"localUnits\": \"%hs\",\n"
-							 L"\t\t\t\t\"digits\": %d,\n"
-							 L"\t\t\t\t\"data\": %f,\n"
-							 L"\t\t\t\t\"minLimit\": %f,\n"
-							 L"\t\t\t\t\"maxLimit\": %f,\n"
-							 L"\t\t\t\t\"flags\": %d\n"
-							 L"\t\t\t}",
-							 first ? "" : ",",
-							 entryIndex,
-							 FormatSpecialChar(entry->name),
-							 FormatSpecialChar(entry->units),
-							 FormatSpecialChar(entry->localName),
-							 FormatSpecialChar(entry->localUnits),
-							 digits,
-							 entry->data,
-							 entry->minLimit,
-							 entry->maxLimit,
-							 entry->flags);
-
-					first = false;
-				}
-
-				++entryIndex;
-			}
-
-			swprintf(json + wcslen(json),
-					 L"\n"
-					 L"\t\t]\n"
-					 L"\t}");
-
-			free(entries);
-		}
-	}
-
-	swprintf(json + wcslen(json), L"\n}");
-
-	return UnicodeToUtf8(json, jsonData);
+	return utf8Size;
 }
 
 unsigned long int __stdcall ClientThread(void *parameter)
 {
 	SOCKET clientSocket = (SOCKET) parameter;
 
-	char buffer[100000];
-
 	int received = 0, sent = 0;
 
-	LOG(received = recv(clientSocket, buffer, sizeof(buffer), 0));
+	int bufferSize = 1000000;
 
-	if (received > 0)
+	char *buffer = 0;
+	
+	LOG(buffer = (char*) malloc(bufferSize * sizeof(char)));
+
+	if (buffer)
 	{
-		buffer[received] = 0;
+		LOG(received = recv(clientSocket, buffer, bufferSize, 0));
 
-		printf(buffer);
-
-		size_t size = 0;
-
-		if ((strstr(buffer, "GET /json ") != 0) || (strstr(buffer, "GET /json?") != 0) ||
-			(strstr(buffer, "GET /json.json ") != 0) || (strstr(buffer, "GET /json.json?") != 0))
+		if (received > 0)
 		{
-			ParseParams(buffer);
+			buffer[received] = 0;
 
-			char *jsonData = 0;
+			printf(buffer);
 
-			size_t jsonSize = CreateJson(&jsonData);
+			size_t size = 0;
 
-			sprintf(buffer, JsonHeader, jsonSize);
-
-			size = strlen(buffer);
-
-			if (jsonSize > 0)
+			if ((strstr(buffer, "GET /json ") != 0) || (strstr(buffer, "GET /json?") != 0) ||
+				(strstr(buffer, "GET /json.json ") != 0) || (strstr(buffer, "GET /json.json?") != 0))
 			{
-				memcpy(buffer + size, jsonData, jsonSize);
+				ParseParams(buffer);
 
-				free(jsonData);
+				char *jsonData = 0;
 
-				size += jsonSize;
+				size_t jsonSize = CreateJson(&jsonData);
+
+				sprintf(buffer, JsonHeader, jsonSize);
+
+				size = strlen(buffer);
+
+				if (jsonSize > 0)
+				{
+					memcpy(buffer + size, jsonData, jsonSize);
+
+					free(jsonData);
+
+					size += jsonSize;
+				}
+
+				buffer[size] = 0;
+
+				printf(JsonHeader, jsonSize);
+			}
+			else if ((strstr(buffer, "GET / ") != 0) || (strstr(buffer, "GET /?") != 0) ||
+				(strstr(buffer, "GET /index.html ") != 0) || (strstr(buffer, "GET /index.html?") != 0))
+			{
+				sprintf(buffer, HtmlIndexHeader, HtmlIndexSize);
+
+				size = strlen(buffer);
+
+				if (HtmlIndexSize > 0)
+				{
+					memcpy(buffer + size, HtmlIndexData, HtmlIndexSize);
+
+					size += HtmlIndexSize;
+				}
+
+				buffer[size] = 0;
+
+				printf(HtmlIndexHeader, HtmlIndexSize);
+			}
+			else
+			{
+				sprintf(buffer, HtmlNotFoundHeader, HtmlNotFoundSize);
+
+				size = strlen(buffer);
+
+				if (HtmlNotFoundSize > 0)
+				{
+					memcpy(buffer + size, HtmlNotFoundData, HtmlNotFoundSize);
+
+					size += HtmlNotFoundSize;
+				}
+
+				buffer[size] = 0;
+
+				printf(HtmlNotFoundHeader, HtmlNotFoundSize);
 			}
 
-			buffer[size] = 0;
-
-			printf(JsonHeader, jsonSize);
-		}
-		else if ((strstr(buffer, "GET / ") != 0) || (strstr(buffer, "GET /?") != 0) ||
-			(strstr(buffer, "GET /index.html ") != 0) || (strstr(buffer, "GET /index.html?") != 0))
-		{
-			sprintf(buffer, HtmlIndexHeader, HtmlIndexSize);
-
-			size = strlen(buffer);
-
-			if (HtmlIndexSize > 0)
-			{
-				memcpy(buffer + size, HtmlIndexData, HtmlIndexSize);
-
-				size += HtmlIndexSize;
-			}
-
-			buffer[size] = 0;
-
-			printf(HtmlIndexHeader, HtmlIndexSize);
-		}
-		else
-		{
-			sprintf(buffer, HtmlNotFoundHeader, HtmlNotFoundSize);
-
-			size = strlen(buffer);
-
-			if (HtmlNotFoundSize > 0)
-			{
-				memcpy(buffer + size, HtmlNotFoundData, HtmlNotFoundSize);
-
-				size += HtmlNotFoundSize;
-			}
-
-			buffer[size] = 0;
-
-			printf(HtmlNotFoundHeader, HtmlNotFoundSize);
+			LOG(sent = send(clientSocket, buffer, (int) size, 0));
 		}
 
-		LOG(sent = send(clientSocket, buffer, (int) size, 0));
+		free(buffer);
 	}
 
 	LOG(shutdown(clientSocket, SD_BOTH));

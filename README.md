@@ -1,5 +1,8 @@
 ### Changelog:
 
+- **v0.3** - [RemoteHWInfo v0.3](https://github.com/Demion/remotehwinfo/releases/download/v0.3/RemoteHWInfo_v0.3.zip)
+  * Fix buffer overflow.
+  * Update index.html format.
 - **v0.2** - [RemoteHWInfo v0.2](https://github.com/Demion/remotehwinfo/releases/download/v0.2/RemoteHWInfo_v0.2.zip)
   * Add GPU-Z monitoring.
   * Add MSI Afterburner monitoring.
