@@ -157,6 +157,7 @@ bool EntryEnabled[EntryTotalCount] = {0};
 unsigned int Port = 60000;
 
 bool Hwinfo = true, Gpuz = true, Afterburner = true;
+bool LogFileEnable = true;
 
 #define LOG(expression) Log(#expression, strrchr(__FILE__, '\\') + 1, __LINE__, (intptr_t) (expression))
 
@@ -476,7 +477,7 @@ size_t CreateJson(char **jsonData)
 	size_t utf8Size = 0;
 
 	wchar_t *json = 0;
-	
+
 	LOG(json = (wchar_t*) malloc(1000000 * sizeof(wchar_t)));
 
 	if (json)
@@ -783,7 +784,7 @@ size_t CreateJson(char **jsonData)
 		swprintf(json + wcslen(json), L"\n}");
 
 		utf8Size = UnicodeToUtf8(json, jsonData);
-		
+
 		free(json);
 	}
 
@@ -799,7 +800,7 @@ unsigned long int __stdcall ClientThread(void *parameter)
 	int bufferSize = 1000000;
 
 	char *buffer = 0;
-	
+
 	LOG(buffer = (char*) malloc(bufferSize * sizeof(char)));
 
 	if (buffer)
@@ -961,9 +962,10 @@ void PrintUsage()
 		"\n"
 		"Usage:\n"
 		"-port (60000 = default)\n"
-		"-hwinfo (0 = disable 1 = enable = default)\n"
-		"-gpuz (0 = disable 1 = enable = default)\n"
-		"-afterburner (0 = disable 1 = enable = default)\n"
+		"-hwinfo (0 = disable; 1 = enable = default)\n"
+		"-gpuz (0 = disable; 1 = enable = default)\n"
+		"-afterburner (0 = disable; 1 = enable = default)\n"
+		"-log (0 = disable; 1 = enable = default)\n"
 		"-help\n"
 		"\n"
 		"http://ip:port/json.json (UTF-8)\n"
@@ -999,9 +1001,15 @@ void ParseArgs(int argc, char *argv[])
 			if (arg + 1 < argc)
 				Afterburner = (atoi(argv[++arg]) != 0);
 		}
+		else if (strcmp(strupr(argv[arg]), "-LOG") == 0)
+		{
+			if (arg + 1 < argc)
+				LogFileEnable = (atoi(argv[++arg]) != 0);
+		}
 		else if (strcmp(strupr(argv[arg]), "-HELP") == 0)
 		{
 			Hwinfo = Gpuz = Afterburner = false;
+			LogFileEnable = false;
 
 			PrintUsage();
 		}
@@ -1012,16 +1020,19 @@ void ParseArgs(int argc, char *argv[])
 
 int main(int argc, char *argv[])
 {
-	LogFile = fopen("log.txt", "a");
-
 	if (argc > 1)
 		ParseArgs(argc, argv);
 
 	if ((Hwinfo) || (Gpuz) || (Afterburner))
+	{
+		if (LogFileEnable)
+			LogFile = fopen("log.txt", "a");
+
 		CreateServer();
 
-	if (LogFile)
-		fclose(LogFile);
+		if (LogFile)
+			fclose(LogFile);
+	}
 
 	return EXIT_SUCCESS;
 }

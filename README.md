@@ -1,5 +1,7 @@
 ### Changelog:
 
+- **v0.4** - [RemoteHWInfo v0.4](https://github.com/Demion/remotehwinfo/releases/download/v0.4/RemoteHWInfo_v0.4.zip)
+  * Add log file switch option.
 - **v0.3** - [RemoteHWInfo v0.3](https://github.com/Demion/remotehwinfo/releases/download/v0.3/RemoteHWInfo_v0.3.zip)
   * Fix buffer overflow.
   * Update index.html format.
@@ -15,9 +17,10 @@ RemoteHWInfo HWiNFO / GPU-Z / MSI Afterburner Remote Monitor HTTP JSON Web Serve
 ### Usage:
 
 - **-port** *(60000 = default)*
-- **-hwinfo** *(0 = disable 1 = enable = default)*
-- **-gpuz** *(0 = disable 1 = enable = default)*
-- **-afterburner** *(0 = disable 1 = enable = default)*
+- **-hwinfo** *(0 = disable; 1 = enable = default)*
+- **-gpuz** *(0 = disable; 1 = enable = default)*
+- **-afterburner** *(0 = disable; 1 = enable = default)*
+- **-log** *(0 = disable; 1 = enable = default)*
 - **-help**
 + http<nolink>://ip:port/**json.json** *(UTF-8)*
 	+ http<nolink>://ip:port/json.json?**enable=0,1,2,3** *(0,1,2,3 = entryIndex)*
