@@ -485,6 +485,7 @@ size_t CreateJson(char **jsonData)
 		int entryIndex = 0;
 
 		bool first = false;
+		bool first_output = true;
 
 		swprintf(json, L"{\n");
 
@@ -497,6 +498,8 @@ size_t CreateJson(char **jsonData)
 
 			if (GetHwinfo(&hwinfo, &sensors, &readings))
 			{
+				first_output = false;
+
 				swprintf(json + wcslen(json),
 						 L"\t\"hwinfo\":\n"
 						 L"\t{\n"
@@ -617,8 +620,12 @@ size_t CreateJson(char **jsonData)
 
 			if (GetGpuz(&gpuz))
 			{
+				if (first_output)
+					first_output = false;
+				else
+					swprintf(json + wcslen(json), L",\n");
+
 				swprintf(json + wcslen(json),
-						 ",\n"
 						 L"\t\"gpuz\":\n"
 						 L"\t{\n"
 						 L"\t\t\"version\": %d,\n"
@@ -709,8 +716,12 @@ size_t CreateJson(char **jsonData)
 
 			if (GetAfterburner(&afterburner, &entries))
 			{
+				if (first_output)
+					first_output = false;
+				else
+					swprintf(json + wcslen(json), L",\n");
+
 				swprintf(json + wcslen(json),
-						 ",\n"
 						 L"\t\"afterburner\":\n"
 						 L"\t{\n"
 						 L"\t\t\"signature\": %d,\n"
