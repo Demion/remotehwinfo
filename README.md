@@ -28,11 +28,6 @@ RemoteHWInfo HWiNFO / GPU-Z / MSI Afterburner Remote Monitor HTTP JSON Web Serve
 + http<nolink>://ip:port/**index.html** *(UTF-8)*
 + http<nolink>://ip:port/**404.html** *(UTF-8)*
 
-### Donation:
-
-- ETH: 0xcb4effdeb46479caa0fef5f5e3569e4852f753a2
-- BTC: 1H1zNLHNxqtMgVYJESF6PjPVq2h9tLW4xG
-
 ### Credits:
 
 - HWiNFO - Professional System Information and Diagnostics https://www.hwinfo.com/
