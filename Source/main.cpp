@@ -9,6 +9,7 @@
 #include <string.h>
 #include <time.h>
 #include <locale.h>
+#include <math.h>
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -286,6 +287,46 @@ wchar_t* FormatSpecialCharUnicode(wchar_t *str)
 	}
 
 	str[length] = L'\0';
+
+	return str;
+}
+
+char* FormatFloat(float value, char *str)
+{
+	switch (fpclassify(value))
+	{
+		case FP_INFINITE:
+			sprintf(str, "\"%sInfinity\"", signbit(value) ? "-" : "");
+			break;
+
+		case FP_NAN:
+			sprintf(str, "\"NaN\"");
+			break;
+
+		default:
+			sprintf(str, "%f", value);
+			break;
+	}
+
+	return str;
+}
+
+char* FormatFloat(double value, char *str)
+{
+	switch (fpclassify(value))
+	{
+		case FP_INFINITE:
+			sprintf(str, "\"%sInfinity\"", signbit(value) ? "-" : "");
+			break;
+
+		case FP_NAN:
+			sprintf(str, "\"NaN\"");
+			break;
+
+		default:
+			sprintf(str, "%lf", value);
+			break;
+	}
 
 	return str;
 }
@@ -570,6 +611,8 @@ size_t CreateJson(char **jsonData)
 
 					if (EntryEnabled[entryIndex])
 					{
+						char readingValue[64], readingValueMin[64], readingValueMax[64], readingValueAvg[64];
+
 						swprintf(json + wcslen(json),
 								 L"%hs\n"
 								 L"\t\t\t{\n"
@@ -580,10 +623,10 @@ size_t CreateJson(char **jsonData)
 								 L"\t\t\t\t\"labelOriginal\": \"%hs\",\n"
 								 L"\t\t\t\t\"labelUser\": \"%hs\",\n"
 								 L"\t\t\t\t\"unit\": \"%hs\",\n"
-								 L"\t\t\t\t\"value\": %lf,\n"
-								 L"\t\t\t\t\"valueMin\": %lf,\n"
-								 L"\t\t\t\t\"valueMax\": %lf,\n"
-								 L"\t\t\t\t\"valueAvg\": %lf\n"
+								 L"\t\t\t\t\"value\": %hs,\n"
+								 L"\t\t\t\t\"valueMin\": %hs,\n"
+								 L"\t\t\t\t\"valueMax\": %hs,\n"
+								 L"\t\t\t\t\"valueAvg\": %hs\n"
 								 L"\t\t\t}",
 								 first ? "" : ",",
 								 entryIndex,
@@ -593,10 +636,10 @@ size_t CreateJson(char **jsonData)
 								 FormatSpecialChar(reading->labelOriginal),
 								 FormatSpecialChar(reading->labelUser),
 								 FormatSpecialChar(reading->unit),
-								 reading->value,
-								 reading->valueMin,
-								 reading->valueMax,
-								 reading->valueAvg);
+								 FormatFloat(reading->value, readingValue),
+								 FormatFloat(reading->valueMin, readingValueMin),
+								 FormatFloat(reading->valueMax, readingValueMax),
+								 FormatFloat(reading->valueAvg, readingValueAvg));
 
 						first = false;
 					}
@@ -678,6 +721,8 @@ size_t CreateJson(char **jsonData)
 					{
 						if (EntryEnabled[entryIndex])
 						{
+							char gpuzSensorsValue[64];
+
 							swprintf(json + wcslen(json),
 									 L"%hs\n"
 									 L"\t\t\t{\n"
@@ -685,14 +730,14 @@ size_t CreateJson(char **jsonData)
 									 L"\t\t\t\t\"name\": \"%s\",\n"
 									 L"\t\t\t\t\"unit\": \"%s\",\n"
 									 L"\t\t\t\t\"digits\": %d,\n"
-									 L"\t\t\t\t\"value\": %lf\n"
+									 L"\t\t\t\t\"value\": %hs\n"
 									 L"\t\t\t}",
 									 first ? "" : ",",
 									 entryIndex,
 									 FormatSpecialCharUnicode(gpuz.sensors[i].name),
 									 FormatSpecialCharUnicode(gpuz.sensors[i].unit),
 									 gpuz.sensors[i].digits,
-									 gpuz.sensors[i].value);
+									 FormatFloat(gpuz.sensors[i].value, gpuzSensorsValue));
 
 							first = false;
 						}
@@ -751,6 +796,8 @@ size_t CreateJson(char **jsonData)
 
 						unsigned int digits = atoi(entry->format + 2);
 
+						char entryData[64], entryMinLimit[64], entryMaxLimit[64];
+
 						swprintf(json + wcslen(json),
 								 L"%hs\n"
 								 L"\t\t\t{\n"
@@ -760,9 +807,9 @@ size_t CreateJson(char **jsonData)
 								 L"\t\t\t\t\"localName\": \"%hs\",\n"
 								 L"\t\t\t\t\"localUnits\": \"%hs\",\n"
 								 L"\t\t\t\t\"digits\": %d,\n"
-								 L"\t\t\t\t\"data\": %f,\n"
-								 L"\t\t\t\t\"minLimit\": %f,\n"
-								 L"\t\t\t\t\"maxLimit\": %f,\n"
+								 L"\t\t\t\t\"data\": %hs,\n"
+								 L"\t\t\t\t\"minLimit\": %hs,\n"
+								 L"\t\t\t\t\"maxLimit\": %hs,\n"
 								 L"\t\t\t\t\"flags\": %d\n"
 								 L"\t\t\t}",
 								 first ? "" : ",",
@@ -772,9 +819,9 @@ size_t CreateJson(char **jsonData)
 								 FormatSpecialChar(entry->localName),
 								 FormatSpecialChar(entry->localUnits),
 								 digits,
-								 entry->data,
-								 entry->minLimit,
-								 entry->maxLimit,
+								 FormatFloat(entry->data, entryData),
+								 FormatFloat(entry->minLimit, entryMinLimit),
+								 FormatFloat(entry->maxLimit, entryMaxLimit),
 								 entry->flags);
 
 						first = false;
