@@ -11,174 +11,181 @@
 			{
 				return str.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 			}
-			
-			var xmlHttp = new XMLHttpRequest();
-			
-			xmlHttp.open('GET', '/json.json', true);
-			
-			xmlHttp.onreadystatechange = function()
-			{
-				if ((this.readyState == 4) && (this.status == 200))
-				{
-					var json = JSON.parse(this.responseText);
-					
-					if (json.hasOwnProperty('hwinfo'))
-					{
-						var html = '<table width="1050" style="table-layout:fixed;">';
-						html += '<tr><td align="left" width="450"><b>HWiNFO</b></td>';
-						html += '<td width="150"></td><td width="150"></td><td width="150"></td><td width="150"></td></tr>';
-						html += '<tr><td align="left"><b>Sensor</b></td>';
-						html += '<td align="right"><b>Current</b></td>';
-						html += '<td align="right"><b>Minimum</b></td>';
-						html += '<td align="right"><b>Maximum</b></td>';
-						html += '<td align="right"><b>Average</b></td></tr>';
-						
-						var sensorIndex = -1;
-						
-						for (var i = 0; i < json.hwinfo.readings.length; ++i)
-						{
-							if (sensorIndex != parseInt(json.hwinfo.readings[i].sensorIndex))
-							{
-								sensorIndex = parseInt(json.hwinfo.readings[i].sensorIndex);
-								
-								var entryIndexBase = 0;
-									
-								for (var j = 0; j < json.hwinfo.sensors.length; ++j)
-								{
-									if ((parseInt(json.hwinfo.sensors[j].entryIndex) + entryIndexBase) == sensorIndex)
-									{
-										html += '<tr><td colspan="5"><b>' + json.hwinfo.sensors[j].sensorNameUser + '</b></td></tr>';
-										
-										break;
-									}
-								}
-							}
-								
-							var digits = 0;
-								
-							switch (json.hwinfo.readings[i].unit)
-							{
-								case 'MHz':
-								case 'GT/s':
-								case '°C':
-								case '%':
-									
-									digits = 1;
-									
-									break;
-										
-								case 'V':
-								case 'A':
-								case 'W':
-								case 'KB/s':
-								case 'MB/s':
-									
-									digits = 3;
-										
-									break;
-							}
-								
-							html += '<tr><td align="left">' + json.hwinfo.readings[i].labelUser + '</td>';
-								
-							if (json.hwinfo.readings[i].unit == 'Yes/No')
-							{
-								html += '<td align="right">' + ((parseFloat(json.hwinfo.readings[i].value) == 0) ? 'No' : 'Yes') + '</td>';
-								
-								html += '<td align="right">' + ((parseFloat(json.hwinfo.readings[i].valueMin) == 0) ? 'No' : 'Yes') + '</td>';
-								
-								html += '<td align="right">' + ((parseFloat(json.hwinfo.readings[i].valueMax) == 0) ? 'No' : 'Yes') + '</td>';
-									
-								html += '<td align="right">' + ((parseFloat(json.hwinfo.readings[i].valueAvg) == 0) ? 'No' : 'Yes') + '</td></tr>';
-							}
-							else
-							{
-								html += '<td align="right">';
-								html += AddCommas(parseFloat(json.hwinfo.readings[i].value).toFixed(digits)) + ' ' + json.hwinfo.readings[i].unit + '</td>';
-								
-								html += '<td align="right">';
-								html += AddCommas(parseFloat(json.hwinfo.readings[i].valueMin).toFixed(digits)) + ' ' + json.hwinfo.readings[i].unit + '</td>';
-								
-								html += '<td align="right">';
-								html += AddCommas(parseFloat(json.hwinfo.readings[i].valueMax).toFixed(digits)) + ' ' + json.hwinfo.readings[i].unit + '</td>';
-									
-								html += '<td align="right">';
-								html += AddCommas(parseFloat(json.hwinfo.readings[i].valueAvg).toFixed(digits)) + ' ' + json.hwinfo.readings[i].unit + '</td></tr>';
-							}
-						}
-						
-						html += '</table>';
-							
-						document.getElementById("hwinfo").innerHTML = html;
-					}
-				
-					if (json.hasOwnProperty('gpuz'))
-					{
-						var html = '<br><table width="1050" style="table-layout:fixed;">';
-						html += '<tr><td align="left" width="250"><b>GPU-Z</b></td>';
-						html += '<td width="350"></td><td width="150"></td><td width="150"></td><td width="150"></td></tr>';
-						html += '<tr><td align="left"><b>Sensor</b></td>';
-						html += '<td align="right"><b>Current</b></td><td></td><td></td><td></td></tr>';
-						
-						for (var i = 0; i < json.gpuz.data.length; ++i)
-						{	
-							if ((json.gpuz.data[i].key.length > 0) && (json.gpuz.data[i].value.length > 0))
-							{
-								html += '<tr><td align="left">' + json.gpuz.data[i].key + '</td>';
-								html += '<td align="right">' + json.gpuz.data[i].value + '</td><td></td><td></td><td></td></tr>';
-							}
-						}
-							
-						for (var i = 0; i < json.gpuz.sensors.length; ++i)
-						{	
-							html += '<tr><td align="left">' + json.gpuz.sensors[i].name + '</td>';
-								
-							if (json.gpuz.sensors[i].unit.indexOf('%%') != -1)
-								json.gpuz.sensors[i].unit = json.gpuz.sensors[i].unit.replace('%%', '%');
 
-							html += '<td align="right">' + parseFloat(json.gpuz.sensors[i].value).toFixed(parseInt(json.gpuz.sensors[i].digits));
-							html += ' ' + json.gpuz.sensors[i].unit + '</td><td></td><td></td><td></td></tr>';
-						}
-							
-						html += '</table>';
-							
-						document.getElementById("gpuz").innerHTML = html;
-					}
-					
-					if (json.hasOwnProperty('afterburner'))
-					{
-						var html = '<br><table width="1050" style="table-layout:fixed;">';
-						html += '<tr><td align="left" width="250"><b>MSI Afterburner</b></td>';
-						html += '<td width="350"></td><td width="150"></td><td width="150"></td><td width="150"></td></tr>';
-						html += '<tr><td align="left"><b>Sensor</b></td>';
-						html += '<td align="right"><b>Current</b></td>';
-						html += '<td align="right"><b>Minimum Limit</b></td>';
-						html += '<td align="right"><b>Maximum Limit</b></td><td></td></tr>';
+			function fetchMetrics() {
+			
+			        var xmlHttp = new XMLHttpRequest();
+			
+			        xmlHttp.open('GET', '/json.json', true);
+			
+        			xmlHttp.onreadystatechange = function()
+        			{
+        				if ((this.readyState == 4) && (this.status == 200))
+        				{
+        					var json = JSON.parse(this.responseText);
+        					
+        					if (json.hasOwnProperty('hwinfo'))
+        					{
+        						var html = '<table width="1050" style="table-layout:fixed;">';
+        						html += '<tr><td align="left" width="450"><b>HWiNFO</b></td>';
+        						html += '<td width="150"></td><td width="150"></td><td width="150"></td><td width="150"></td></tr>';
+        						html += '<tr><td align="left"><b>Sensor</b></td>';
+        						html += '<td align="right"><b>Current</b></td>';
+        						html += '<td align="right"><b>Minimum</b></td>';
+        						html += '<td align="right"><b>Maximum</b></td>';
+        						html += '<td align="right"><b>Average</b></td></tr>';
+        						
+        						var sensorIndex = -1;
+        						
+        						for (var i = 0; i < json.hwinfo.readings.length; ++i)
+        						{
+        							if (sensorIndex != parseInt(json.hwinfo.readings[i].sensorIndex))
+        							{
+        								sensorIndex = parseInt(json.hwinfo.readings[i].sensorIndex);
+        								
+        								var entryIndexBase = 0;
+        									
+        								for (var j = 0; j < json.hwinfo.sensors.length; ++j)
+        								{
+        									if ((parseInt(json.hwinfo.sensors[j].entryIndex) + entryIndexBase) == sensorIndex)
+        									{
+        										html += '<tr><td colspan="5"><b>' + json.hwinfo.sensors[j].sensorNameUser + '</b></td></tr>';
+        										
+        										break;
+        									}
+        								}
+        							}
+        								
+        							var digits = 0;
+        								
+        							switch (json.hwinfo.readings[i].unit)
+        							{
+        								case 'MHz':
+        								case 'GT/s':
+        								case '°C':
+        								case '%':
+        									
+        									digits = 1;
+        									
+        									break;
+        										
+        								case 'V':
+        								case 'A':
+        								case 'W':
+        								case 'KB/s':
+        								case 'MB/s':
+        									
+        									digits = 3;
+        										
+        									break;
+        							}
+        								
+        							html += '<tr><td align="left">' + json.hwinfo.readings[i].labelUser + '</td>';
+        								
+        							if (json.hwinfo.readings[i].unit == 'Yes/No')
+        							{
+        								html += '<td align="right">' + ((parseFloat(json.hwinfo.readings[i].value) == 0) ? 'No' : 'Yes') + '</td>';
+        								
+        								html += '<td align="right">' + ((parseFloat(json.hwinfo.readings[i].valueMin) == 0) ? 'No' : 'Yes') + '</td>';
+        								
+        								html += '<td align="right">' + ((parseFloat(json.hwinfo.readings[i].valueMax) == 0) ? 'No' : 'Yes') + '</td>';
+        									
+        								html += '<td align="right">' + ((parseFloat(json.hwinfo.readings[i].valueAvg) == 0) ? 'No' : 'Yes') + '</td></tr>';
+        							}
+        							else
+        							{
+        								html += '<td align="right">';
+        								html += AddCommas(parseFloat(json.hwinfo.readings[i].value).toFixed(digits)) + ' ' + json.hwinfo.readings[i].unit + '</td>';
+        								
+        								html += '<td align="right">';
+        								html += AddCommas(parseFloat(json.hwinfo.readings[i].valueMin).toFixed(digits)) + ' ' + json.hwinfo.readings[i].unit + '</td>';
+        								
+        								html += '<td align="right">';
+        								html += AddCommas(parseFloat(json.hwinfo.readings[i].valueMax).toFixed(digits)) + ' ' + json.hwinfo.readings[i].unit + '</td>';
+        									
+        								html += '<td align="right">';
+        								html += AddCommas(parseFloat(json.hwinfo.readings[i].valueAvg).toFixed(digits)) + ' ' + json.hwinfo.readings[i].unit + '</td></tr>';
+        							}
+        						}
+        						
+        						html += '</table>';
+        							
+        						document.getElementById("hwinfo").innerHTML = html;
+        					}
+        				
+        					if (json.hasOwnProperty('gpuz'))
+        					{
+        						var html = '<br><table width="1050" style="table-layout:fixed;">';
+        						html += '<tr><td align="left" width="250"><b>GPU-Z</b></td>';
+        						html += '<td width="350"></td><td width="150"></td><td width="150"></td><td width="150"></td></tr>';
+        						html += '<tr><td align="left"><b>Sensor</b></td>';
+        						html += '<td align="right"><b>Current</b></td><td></td><td></td><td></td></tr>';
+        						
+        						for (var i = 0; i < json.gpuz.data.length; ++i)
+        						{	
+        							if ((json.gpuz.data[i].key.length > 0) && (json.gpuz.data[i].value.length > 0))
+        							{
+        								html += '<tr><td align="left">' + json.gpuz.data[i].key + '</td>';
+        								html += '<td align="right">' + json.gpuz.data[i].value + '</td><td></td><td></td><td></td></tr>';
+        							}
+        						}
+        							
+        						for (var i = 0; i < json.gpuz.sensors.length; ++i)
+        						{	
+        							html += '<tr><td align="left">' + json.gpuz.sensors[i].name + '</td>';
+        								
+        							if (json.gpuz.sensors[i].unit.indexOf('%%') != -1)
+        								json.gpuz.sensors[i].unit = json.gpuz.sensors[i].unit.replace('%%', '%');
+        
+        							html += '<td align="right">' + parseFloat(json.gpuz.sensors[i].value).toFixed(parseInt(json.gpuz.sensors[i].digits));
+        							html += ' ' + json.gpuz.sensors[i].unit + '</td><td></td><td></td><td></td></tr>';
+        						}
+        							
+        						html += '</table>';
+        							
+        						document.getElementById("gpuz").innerHTML = html;
+        					}
+        					
+        					if (json.hasOwnProperty('afterburner'))
+        					{
+        						var html = '<br><table width="1050" style="table-layout:fixed;">';
+        						html += '<tr><td align="left" width="250"><b>MSI Afterburner</b></td>';
+        						html += '<td width="350"></td><td width="150"></td><td width="150"></td><td width="150"></td></tr>';
+        						html += '<tr><td align="left"><b>Sensor</b></td>';
+        						html += '<td align="right"><b>Current</b></td>';
+        						html += '<td align="right"><b>Minimum Limit</b></td>';
+        						html += '<td align="right"><b>Maximum Limit</b></td><td></td></tr>';
+        
+        						for (var i = 0; i < json.afterburner.entries.length; ++i)
+        						{	
+        							html += '<tr><td align="left">' + json.afterburner.entries[i].localName + '</td>';
+        								
+        							if ((parseFloat(json.afterburner.entries[i].data) > 3.4e+38) || (parseFloat(json.afterburner.entries[i].data) < 1.1e-38))
+        								json.afterburner.entries[i].data = 0;
+        								
+        							html += '<td align="right">' + parseFloat(json.afterburner.entries[i].data).toFixed(json.afterburner.entries[i].digits);
+        							html += ' ' + json.afterburner.entries[i].localUnits + '</td>';
+        							
+        							html += '<td align="right">' + parseFloat(json.afterburner.entries[i].minLimit).toFixed(json.afterburner.entries[i].digits);
+        							html += ' ' + json.afterburner.entries[i].localUnits + '</td>';
+        								
+        							html += '<td align="right">' + parseFloat(json.afterburner.entries[i].maxLimit).toFixed(json.afterburner.entries[i].digits);
+        							html += ' ' + json.afterburner.entries[i].localUnits + '</td><td></td></tr>';
+        						}
+        							
+        						html += '</table>';
+        							
+        						document.getElementById("afterburner").innerHTML = html;
+        					}
+        				}				
+        			};
+        				
+        			xmlHttp.send();
+                        }
 
-						for (var i = 0; i < json.afterburner.entries.length; ++i)
-						{	
-							html += '<tr><td align="left">' + json.afterburner.entries[i].localName + '</td>';
-								
-							if ((parseFloat(json.afterburner.entries[i].data) > 3.4e+38) || (parseFloat(json.afterburner.entries[i].data) < 1.1e-38))
-								json.afterburner.entries[i].data = 0;
-								
-							html += '<td align="right">' + parseFloat(json.afterburner.entries[i].data).toFixed(json.afterburner.entries[i].digits);
-							html += ' ' + json.afterburner.entries[i].localUnits + '</td>';
-							
-							html += '<td align="right">' + parseFloat(json.afterburner.entries[i].minLimit).toFixed(json.afterburner.entries[i].digits);
-							html += ' ' + json.afterburner.entries[i].localUnits + '</td>';
-								
-							html += '<td align="right">' + parseFloat(json.afterburner.entries[i].maxLimit).toFixed(json.afterburner.entries[i].digits);
-							html += ' ' + json.afterburner.entries[i].localUnits + '</td><td></td></tr>';
-						}
-							
-						html += '</table>';
-							
-						document.getElementById("afterburner").innerHTML = html;
-					}
-				}				
-			};
-				
-			xmlHttp.send();
-			</script>
+                        fetchMetrics();
+
+                        setInterval(fetchMetrics, 1000);
+		</script>
 	</body>
 </html>
