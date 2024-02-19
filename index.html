@@ -69,9 +69,9 @@
 
 				function fetchMetrics() {
 			
-			        var xmlHttp = new XMLHttpRequest();
-			
-			        xmlHttp.open('GET', '/json.json', true);
+					var xmlHttp = new XMLHttpRequest();
+
+					xmlHttp.open('GET', '/json.json', true);
 			
 					xmlHttp.onreadystatechange = function()
 					{
@@ -189,7 +189,7 @@
 										
 									if (json.gpuz.sensors[i].unit.indexOf('%%') != -1)
 										json.gpuz.sensors[i].unit = json.gpuz.sensors[i].unit.replace('%%', '%');
-		
+									
 									html += '<td align="right">' + parseFloat(json.gpuz.sensors[i].value).toFixed(parseInt(json.gpuz.sensors[i].digits));
 									html += ' ' + json.gpuz.sensors[i].unit + '</td><td></td><td></td><td></td></tr>';
 								}
@@ -208,7 +208,7 @@
 								html += '<td align="right"><b>Current</b></td>';
 								html += '<td align="right"><b>Minimum Limit</b></td>';
 								html += '<td align="right"><b>Maximum Limit</b></td><td></td></tr>';
-		
+
 								for (var i = 0; i < json.afterburner.entries.length; ++i)
 								{	
 									html += '<tr><td align="left">' + json.afterburner.entries[i].localName + '</td>';
@@ -230,9 +230,9 @@
 									
 								document.getElementById("afterburner").innerHTML = html;
 							}
-						}				
+						}
 					};
-						
+					
 					xmlHttp.send();
 				}
 
