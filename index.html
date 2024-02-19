@@ -1,18 +1,73 @@
 <html>
 	<head>
 		<title>RemoteHWInfo</title>
+		<link rel="shortcut icon" href="data:image/x-icon;base64,AAABAAEAEBAQAAEABAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAgAAAAAAAAAAAAAAAEAAAAAAAAADy8vIAFxcXAP7+/gC/hBcAvoQWAP///wC/hRcAvoUWAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEREREREREREREREREREREREREBIRIRERERFVFVFVEREREVUVUVURERERVRVRVRERERFVFVFVEREREREREREREWZmVWVWZWZmZmZVZVZVZmZmdlVlVmZmZmZ2VWVWZmZmZnZVZVZmZmY2ZyJmZmZmZnRmZmZmZmZmZjZmZmZmZmYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" />
+		<style>
+			body {
+				font-family: "JetBrains Mono",monospace;
+			}
+
+			table {
+				width: 100%;
+				border-collapse: collapse;
+				background-color: #222;
+				color: #fff;
+			}
+			
+			thead {
+				background-color: #444;
+				color: #fff;
+				padding: 10px;
+				text-align: left;
+			}
+
+			thead td {
+				font-size: 20;
+			}
+			
+			td {
+				padding: 10px;
+				border-bottom: 1px solid #555;
+				font-size: 14;
+			}
+
+			#category td{
+				background-color: #333;
+				font-size: 17;
+			}
+
+			thead tr:hover {
+				background-color: #444 !important;;
+				color: #fff !important;;
+				font-size: 20;
+			}
+
+			tr:hover:not(#category) {
+				background-color: #999;
+				color: #000;
+				font-size: 14.5;
+				font-weight: bold;
+			}
+
+			#checkboxContainer {
+				position: absolute;
+				left: 50%;
+				transform: translate(-50%);
+			}
+		</style>
 	</head>
 	<body>
 		<div id="hwinfo"></div>
 		<div id="gpuz"></div>
 		<div id="afterburner"></div>
+		<div id="checkboxContainer"><input type="checkbox" id="auotRefreshCheckbox"> Auto Refresh</div>
 		<script>
-			function AddCommas(str) 
-			{
-				return str.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-			}
+				function AddCommas(str) 
+				{
+					return str.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+				}
 
-			function fetchMetrics() {
+				function fetchMetrics() {
 			
 			        var xmlHttp = new XMLHttpRequest();
 			
@@ -27,13 +82,11 @@
         					if (json.hasOwnProperty('hwinfo'))
         					{
         						var html = '<table width="1050" style="table-layout:fixed;">';
-        						html += '<tr><td align="left" width="450"><b>HWiNFO</b></td>';
-        						html += '<td width="150"></td><td width="150"></td><td width="150"></td><td width="150"></td></tr>';
-        						html += '<tr><td align="left"><b>Sensor</b></td>';
+        						html += '<thead><tr><td align="left"><b>Sensor</b></td>';
         						html += '<td align="right"><b>Current</b></td>';
         						html += '<td align="right"><b>Minimum</b></td>';
         						html += '<td align="right"><b>Maximum</b></td>';
-        						html += '<td align="right"><b>Average</b></td></tr>';
+        						html += '<td align="right"><b>Average</b></td></tr></thead>';
         						
         						var sensorIndex = -1;
         						
@@ -49,7 +102,7 @@
         								{
         									if ((parseInt(json.hwinfo.sensors[j].entryIndex) + entryIndexBase) == sensorIndex)
         									{
-        										html += '<tr><td colspan="5"><b>' + json.hwinfo.sensors[j].sensorNameUser + '</b></td></tr>';
+        										html += '<tr id="category"><td colspan="5"><b>' + json.hwinfo.sensors[j].sensorNameUser + '</b></td></tr>';
         										
         										break;
         									}
@@ -181,11 +234,18 @@
         			};
         				
         			xmlHttp.send();
-                        }
+				}
 
-                        fetchMetrics();
+                fetchMetrics();
 
-                        setInterval(fetchMetrics, 1000);
+				const auotRefreshCheckbox = document.getElementById('auotRefreshCheckbox');
+				auotRefreshCheckbox.addEventListener('change', function() {
+					if (this.checked) {
+						interval = setInterval(fetchMetrics, 1000);
+					} else {
+						clearInterval(interval);
+					}
+				});
 		</script>
 	</body>
 </html>
