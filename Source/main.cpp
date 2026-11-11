@@ -1,15 +1,20 @@
 #define _CRT_SECURE_NO_WARNINGS
 #define _CRT_NONSTDC_NO_WARNINGS
-#define _CRT_NON_CONFORMING_SWPRINTFS
 
 #include <Winsock2.h>
 #include <Windows.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdarg.h>
+#include <stddef.h>
 #include <string.h>
 #include <time.h>
 #include <locale.h>
 #include <math.h>
+
+#include <string>
+#include <vector>
+#include <set>
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -116,222 +121,318 @@ enum class HwinfoReadingType
 	Other
 };
 
-const char JsonHeader[] =
-"HTTP/1.1 200 OK\r\n"
-"Content-Type: application/json; charset=utf-8\r\n"
-"Content-Size: %d\r\n"
-"Connection: close\r\n"
-"Access-Control-Allow-Origin: *\r\n"
-"\r\n";
-
-const char HtmlIndexHeader[] =
-"HTTP/1.1 200 OK\r\n"
-"Content-Type: text/html; charset=utf-8\r\n"
-"Content-Size: %d\r\n"
-"Connection: close\r\n"
-"Access-Control-Allow-Origin: *\r\n"
-"\r\n";
-
-const char HtmlNotFoundHeader[] =
-"HTTP/1.1 404 Not Found\r\n"
-"Content-Type: text/html; charset=utf-8\r\n"
-"Content-Size: %d\r\n"
-"Connection: close\r\n"
-"Access-Control-Allow-Origin: *\r\n"
-"\r\n";
-
 const wchar_t HtmlIndexDataDefault[] =
 L"<html>\n\t<head>\n\t\t<title>RemoteHWInfo</title>\n\t</head>\n\t<body>\n\t</body>\n</html>";
 
 const wchar_t HtmlNotFoundDataDefault[] =
 L"<html>\n\t<head>\n\t\t<title>RemoteHWInfo</title>\n\t</head>\n\t<body>\n\t\t404 Not Found\n\t</body>\n</html>";
 
-char *HtmlIndexData = 0;
-size_t HtmlIndexSize = 0;
+std::string HtmlIndexData;
+std::string HtmlNotFoundData;
 
-char *HtmlNotFoundData = 0;
-size_t HtmlNotFoundSize = 0;
-
-const unsigned int EntryTotalCount = 1024;
-bool EntryEnabled[EntryTotalCount] = {0};
+const size_t MaxFileSize = 16 * 1024 * 1024;
+const size_t MaxRequestSize = 16 * 1024;
+const unsigned int MaxEntryCount = 1000000;
+const long MaxClients = 32;
+const DWORD ClientTimeoutMs = 5000;
+const long long MaxLogFileSize = 10 * 1024 * 1024;
 
 unsigned int Port = 60000;
 
 bool Hwinfo = true, Gpuz = true, Afterburner = true;
 bool LogFileEnable = true;
 
-#define LOG(expression) Log(#expression, strrchr(__FILE__, '\\') + 1, __LINE__, (intptr_t) (expression))
+volatile long ActiveClients = 0;
 
 FILE *LogFile = 0;
+CRITICAL_SECTION LogLock;
+
+const char* BaseName(const char *path)
+{
+	const char *name = path;
+
+	for (const char *p = path; *p; ++p)
+	{
+		if ((*p == '\\') || (*p == '/'))
+			name = p + 1;
+	}
+
+	return name;
+}
+
+#define LOG(expression) Log(#expression, BaseName(__FILE__), __LINE__, (intptr_t) (expression))
 
 intptr_t Log(const char *expression, const char *fileName, unsigned int line, intptr_t result)
 {
 	if (LogFile)
 	{
+		EnterCriticalSection(&LogLock);
+
 		time_t t = time(0);
-		tm *local = localtime(&t);
+		tm local = {0};
 
-		fprintf(LogFile, "[%02d.%02d.%04d %02d:%02d:%02d][%8s:%04d] %-102s %-20zd (0x%0*zX)\n",
-				local->tm_mday, local->tm_mon + 1, local->tm_year + 1900, local->tm_hour, local->tm_min, local->tm_sec, fileName, line, expression, result, (unsigned int) sizeof(result) * 2, result);
+		if (localtime_s(&local, &t) == 0)
+		{
+			fprintf(LogFile, "[%02d.%02d.%04d %02d:%02d:%02d][%8s:%04d] %-102s %-20zd (0x%0*zX)\n",
+					local.tm_mday, local.tm_mon + 1, local.tm_year + 1900, local.tm_hour, local.tm_min, local.tm_sec, fileName, line, expression, result, (int) (sizeof(result) * 2), result);
 
-		fflush(LogFile);
+			fflush(LogFile);
+		}
+
+		LeaveCriticalSection(&LogLock);
 	}
 
 	return result;
 }
 
-size_t LoadFile(const char *fileName, void **fileData)
+bool LoadFile(const char *fileName, std::string &data)
 {
-	size_t readSize = 0;
+	data.clear();
 
 	FILE *file = 0;
 
 	LOG(file = fopen(fileName, "rb"));
 
-	if (file)
+	if (!file)
+		return false;
+
+	bool result = false;
+
+	if (LOG(_fseeki64(file, 0, SEEK_END)) == 0)
 	{
-		if (LOG(fseek(file, 0, SEEK_END)) == 0)
+		long long fileSize = 0;
+
+		LOG(fileSize = _ftelli64(file));
+
+		if ((fileSize > 0) && ((unsigned long long) fileSize <= MaxFileSize))
 		{
-			int fileSize = 0;
-
-			LOG(fileSize = ftell(file));
-
-			if (fileSize > 0)
+			if (LOG(_fseeki64(file, 0, SEEK_SET)) == 0)
 			{
-				if (LOG(fseek(file, 0, SEEK_SET)) == 0)
-				{
-					if (fileData)
-					{
-						LOG(*fileData = malloc(fileSize));
+				data.resize((size_t) fileSize);
 
-						if (*fileData)
-							LOG(readSize = fread(*fileData, 1, fileSize, file));
-					}
-				}
-			}
-		}
+				size_t readSize = 0;
 
-		LOG(fclose(file));
-	}
+				LOG(readSize = fread(&data[0], 1, (size_t) fileSize, file));
 
-	return readSize;
-}
+				data.resize(readSize);
 
-size_t UnicodeToUtf8(const wchar_t *unicode, char **utf8)
-{
-	size_t utf8Size = 0;
-
-	size_t unicodeSize = wcslen(unicode);
-
-	if (unicodeSize > 0)
-	{
-		LOG(utf8Size = WideCharToMultiByte(CP_UTF8, 0, unicode, (int) unicodeSize, 0, 0, 0, 0));
-
-		if (utf8Size > 0)
-		{
-			if (utf8)
-			{
-				LOG(*utf8 = (char*) malloc(utf8Size * sizeof(char)));
-
-				if (*utf8)
-				{
-					LOG(utf8Size = WideCharToMultiByte(CP_UTF8, 0, unicode, (int) unicodeSize, *utf8, (int) utf8Size, 0, 0));
-
-					if (utf8Size == 0)
-						free(*utf8);
-				}
+				result = (readSize > 0);
 			}
 		}
 	}
 
-	return utf8Size;
+	LOG(fclose(file));
+
+	return result;
 }
 
-char* FormatSpecialChar(char *str)
+std::string UnicodeToUtf8(const wchar_t *unicode, size_t unicodeSize)
 {
-	size_t length = strlen(str);
+	std::string utf8;
 
-	for (unsigned int i = 0; i < length; ++i)
+	if ((unicode == 0) || (unicodeSize == 0) || (unicodeSize > 0x7FFFFFFF))
+		return utf8;
+
+	int size = WideCharToMultiByte(CP_UTF8, 0, unicode, (int) unicodeSize, 0, 0, 0, 0);
+
+	if (size > 0)
 	{
-		if ((str[i] == '\\') || (str[i] == '\"'))
+		utf8.resize((size_t) size);
+
+		size = WideCharToMultiByte(CP_UTF8, 0, unicode, (int) unicodeSize, &utf8[0], size, 0, 0);
+
+		if (size > 0)
+			utf8.resize((size_t) size);
+		else
+			utf8.clear();
+	}
+
+	return utf8;
+}
+
+std::string AnsiToUtf8(const char *ansi, size_t ansiSize)
+{
+	if ((ansi == 0) || (ansiSize == 0) || (ansiSize > 0x7FFFFFFF))
+		return std::string();
+
+	int size = MultiByteToWideChar(CP_ACP, 0, ansi, (int) ansiSize, 0, 0);
+
+	if (size <= 0)
+		return std::string();
+
+	std::wstring unicode((size_t) size, L'\0');
+
+	size = MultiByteToWideChar(CP_ACP, 0, ansi, (int) ansiSize, &unicode[0], size);
+
+	if (size <= 0)
+		return std::string();
+
+	return UnicodeToUtf8(unicode.c_str(), (size_t) size);
+}
+
+// Escape an UTF-8 string for use inside a JSON string.
+std::string JsonEscape(const std::string &utf8)
+{
+	std::string out;
+
+	out.reserve(utf8.size() + 8);
+
+	for (size_t i = 0; i < utf8.size(); ++i)
+	{
+		unsigned char c = (unsigned char) utf8[i];
+
+		switch (c)
 		{
-			for (size_t j = length; j > i; --j)
-				str[j] = str[j - 1];
+			case '\\': out += "\\\\"; break;
+			case '\"': out += "\\\""; break;
+			case '\b': out += "\\b"; break;
+			case '\f': out += "\\f"; break;
+			case '\n': out += "\\n"; break;
+			case '\r': out += "\\r"; break;
+			case '\t': out += "\\t"; break;
 
-			str[i++] = '\\';
+			default:
+				if (c < 0x20)
+				{
+					char buffer[8];
 
-			++length;
+					sprintf(buffer, "\\u%04x", (unsigned int) c);
+
+					out += buffer;
+				}
+				else
+				{
+					out += (char) c;
+				}
+				break;
 		}
 	}
 
-	str[length] = '\0';
-
-	return str;
+	return out;
 }
 
-wchar_t* FormatSpecialCharUnicode(wchar_t *str)
+// Fixed size ANSI field (not necessarily zero terminated).
+std::string EscapeAnsi(const char *str, size_t maxLength)
 {
-	size_t length = wcslen(str);
+	return JsonEscape(AnsiToUtf8(str, strnlen(str, maxLength)));
+}
 
-	for (unsigned int i = 0; i < length; ++i)
+// Fixed size wide field (not necessarily zero terminated).
+std::string EscapeWide(const wchar_t *str, size_t maxLength)
+{
+	size_t length = 0;
+
+	while ((length < maxLength) && (str[length] != L'\0'))
+		++length;
+
+	return JsonEscape(UnicodeToUtf8(str, length));
+}
+
+std::string FormatFloat(double value)
+{
+	char buffer[512];
+
+	switch (_fpclass(value))
 	{
-		if ((str[i] == L'\\') || (str[i] == L'\"'))
+		case _FPCLASS_NINF:
+			return "\"-Infinity\"";
+
+		case _FPCLASS_PINF:
+			return "\"Infinity\"";
+
+		case _FPCLASS_SNAN:
+		case _FPCLASS_QNAN:
+			return "\"NaN\"";
+
+		default:
+			_snprintf(buffer, sizeof(buffer), "%f", value);
+			buffer[sizeof(buffer) - 1] = '\0';
+			return buffer;
+	}
+}
+
+// Simple growing output buffer with printf style append.
+struct Output
+{
+	std::string text;
+
+	void Append(const char *text_)
+	{
+		text += text_;
+	}
+
+	void Append(const std::string &text_)
+	{
+		text += text_;
+	}
+
+	void Format(const char *format, ...)
+	{
+		va_list args;
+
+		va_start(args, format);
+		int length = _vscprintf(format, args);
+		va_end(args);
+
+		if (length <= 0)
+			return;
+
+		std::vector<char> buffer((size_t) length + 1);
+
+		va_start(args, format);
+		_vsnprintf(&buffer[0], buffer.size(), format, args);
+		va_end(args);
+
+		buffer[buffer.size() - 1] = '\0';
+
+		text.append(&buffer[0], (size_t) length);
+	}
+};
+
+// Entry filter from the request (?enable=... / ?disable=...), per request.
+struct EntryFilter
+{
+	enum Mode { All, Enable, Disable };
+
+	Mode mode;
+	std::set<unsigned int> indexes;
+
+	EntryFilter() : mode(All) {}
+
+	bool IsEnabled(unsigned int entryIndex) const
+	{
+		switch (mode)
 		{
-			for (size_t j = length; j > i; --j)
-				str[j] = str[j - 1];
+			case Enable:
+				return indexes.count(entryIndex) != 0;
 
-			str[i++] = L'\\';
+			case Disable:
+				return indexes.count(entryIndex) == 0;
 
-			++length;
+			default:
+				return true;
 		}
 	}
+};
 
-	str[length] = L'\0';
-
-	return str;
-}
-
-char* FormatFloat(float value, char *str)
+size_t ViewSize(const void *address)
 {
-	switch (fpclassify(value))
-	{
-		case FP_INFINITE:
-			sprintf(str, "\"%sInfinity\"", signbit(value) ? "-" : "");
-			break;
+	MEMORY_BASIC_INFORMATION info = {0};
 
-		case FP_NAN:
-			sprintf(str, "\"NaN\"");
-			break;
+	if (VirtualQuery(address, &info, sizeof(info)) == 0)
+		return 0;
 
-		default:
-			sprintf(str, "%f", value);
-			break;
-	}
-
-	return str;
+	return info.RegionSize;
 }
 
-char* FormatFloat(double value, char *str)
+struct HwinfoData
 {
-	switch (fpclassify(value))
-	{
-		case FP_INFINITE:
-			sprintf(str, "\"%sInfinity\"", signbit(value) ? "-" : "");
-			break;
+	HWINFO_SENSORS_SHARED_MEM2 header;
+	std::vector<unsigned char> sensors;
+	std::vector<unsigned char> readings;
+};
 
-		case FP_NAN:
-			sprintf(str, "\"NaN\"");
-			break;
-
-		default:
-			sprintf(str, "%lf", value);
-			break;
-	}
-
-	return str;
-}
-
-bool GetHwinfo(HWINFO_SENSORS_SHARED_MEM2 *hwinfo, void **sensors, void **readings)
+bool GetHwinfo(HwinfoData &data)
 {
 	bool result = false;
 
@@ -347,38 +448,28 @@ bool GetHwinfo(HWINFO_SENSORS_SHARED_MEM2 *hwinfo, void **sensors, void **readin
 
 		if (mapAddress)
 		{
-			if (hwinfo)
-				memcpy(hwinfo, mapAddress, sizeof(HWINFO_SENSORS_SHARED_MEM2));
+			unsigned long long viewSize = ViewSize(mapAddress);
 
-			result = true;
-
-			if (sensors)
+			if (viewSize >= sizeof(HWINFO_SENSORS_SHARED_MEM2))
 			{
-				LOG(*sensors = malloc(hwinfo->sensorSize * hwinfo->sensorCount));
+				memcpy(&data.header, mapAddress, sizeof(HWINFO_SENSORS_SHARED_MEM2));
 
-				if (*sensors)
-					memcpy(*sensors, (unsigned char*) mapAddress + hwinfo->sensorOffset, hwinfo->sensorSize * hwinfo->sensorCount);
-				else
-					result = false;
-			}
+				const HWINFO_SENSORS_SHARED_MEM2 &h = data.header;
 
-			if (result)
-			{
-				if (readings)
+				bool valid =
+					(h.sensorSize >= sizeof(HWINFO_SENSORS_SENSOR)) && (h.readingSize >= sizeof(HWINFO_SENSORS_READING)) &&
+					(h.sensorCount <= MaxEntryCount) && (h.readingCount <= MaxEntryCount) &&
+					((unsigned long long) h.sensorOffset + (unsigned long long) h.sensorSize * h.sensorCount <= viewSize) &&
+					((unsigned long long) h.readingOffset + (unsigned long long) h.readingSize * h.readingCount <= viewSize);
+
+				if (valid)
 				{
-					LOG(*readings = malloc(hwinfo->readingSize * hwinfo->readingCount));
+					const unsigned char *base = (const unsigned char*) mapAddress;
 
-					if (*readings)
-					{
-						memcpy(*readings, (unsigned char*) mapAddress + hwinfo->readingOffset, hwinfo->readingSize * hwinfo->readingCount);
-					}
-					else
-					{
-						if (sensors)
-							free(*sensors);
+					data.sensors.assign(base + h.sensorOffset, base + h.sensorOffset + (size_t) h.sensorSize * h.sensorCount);
+					data.readings.assign(base + h.readingOffset, base + h.readingOffset + (size_t) h.readingSize * h.readingCount);
 
-						result = false;
-					}
+					result = true;
 				}
 			}
 
@@ -391,9 +482,11 @@ bool GetHwinfo(HWINFO_SENSORS_SHARED_MEM2 *hwinfo, void **sensors, void **readin
 	return result;
 }
 
-bool GetGpuz(GPUZ_SH_MEM *gpuz)
+bool GetGpuz(GPUZ_SH_MEM &gpuz)
 {
 	bool result = false;
+
+	memset(&gpuz, 0, sizeof(gpuz));
 
 	HANDLE mapFile = 0;
 
@@ -407,10 +500,35 @@ bool GetGpuz(GPUZ_SH_MEM *gpuz)
 
 		if (mapAddress)
 		{
-			if (gpuz)
-				memcpy(gpuz, mapAddress, sizeof(GPUZ_SH_MEM));
+			size_t size = ViewSize(mapAddress);
 
-			result = true;
+			if (size > sizeof(GPUZ_SH_MEM))
+				size = sizeof(GPUZ_SH_MEM);
+
+			if (size >= offsetof(GPUZ_SH_MEM, data))
+			{
+				// Wait (shortly) until GPU-Z has finished updating the data.
+				for (int attempt = 0; attempt < 10; ++attempt)
+				{
+					memcpy(&gpuz, mapAddress, size);
+
+					if (gpuz.busy == 0)
+						break;
+
+					Sleep(2);
+				}
+
+				// Guarantee zero terminated strings.
+				for (int i = 0; i < 128; ++i)
+				{
+					gpuz.data[i].key[255] = L'\0';
+					gpuz.data[i].value[255] = L'\0';
+					gpuz.sensors[i].name[255] = L'\0';
+					gpuz.sensors[i].unit[7] = L'\0';
+				}
+
+				result = true;
+			}
 
 			LOG(UnmapViewOfFile(mapAddress));
 		}
@@ -421,7 +539,13 @@ bool GetGpuz(GPUZ_SH_MEM *gpuz)
 	return result;
 }
 
-bool GetAfterburner(MAHM_SHARED_MEMORY_HEADER *afterburner, void **entries)
+struct AfterburnerData
+{
+	MAHM_SHARED_MEMORY_HEADER header;
+	std::vector<unsigned char> entries;
+};
+
+bool GetAfterburner(AfterburnerData &data)
 {
 	bool result = false;
 
@@ -437,19 +561,26 @@ bool GetAfterburner(MAHM_SHARED_MEMORY_HEADER *afterburner, void **entries)
 
 		if (mapAddress)
 		{
-			if (afterburner)
-				memcpy(afterburner, mapAddress, sizeof(MAHM_SHARED_MEMORY_HEADER));
+			unsigned long long viewSize = ViewSize(mapAddress);
 
-			result = true;
-
-			if (entries)
+			if (viewSize >= sizeof(MAHM_SHARED_MEMORY_HEADER))
 			{
-				LOG(*entries = malloc(afterburner->entrySize * afterburner->entryCount));
+				memcpy(&data.header, mapAddress, sizeof(MAHM_SHARED_MEMORY_HEADER));
 
-				if (*entries)
-					memcpy(*entries, (unsigned char*) mapAddress + afterburner->headerSize, afterburner->entrySize * afterburner->entryCount);
-				else
-					result = false;
+				const MAHM_SHARED_MEMORY_HEADER &h = data.header;
+
+				bool valid =
+					(h.entrySize >= sizeof(MAHM_SHARED_MEMORY_ENTRY)) && (h.entryCount <= MaxEntryCount) &&
+					((unsigned long long) h.headerSize + (unsigned long long) h.entrySize * h.entryCount <= viewSize);
+
+				if (valid)
+				{
+					const unsigned char *base = (const unsigned char*) mapAddress;
+
+					data.entries.assign(base + h.headerSize, base + h.headerSize + (size_t) h.entrySize * h.entryCount);
+
+					result = true;
+				}
 			}
 
 			LOG(UnmapViewOfFile(mapAddress));
@@ -461,491 +592,520 @@ bool GetAfterburner(MAHM_SHARED_MEMORY_HEADER *afterburner, void **entries)
 	return result;
 }
 
-void ParseParams(const char *buffer)
+// Parse "enable=1,2,3" / "disable=1,2,3" from the query string.
+void ParseQuery(const std::string &query, EntryFilter &filter)
 {
-	bool enable = false, disable = false;
+	size_t pos = 0;
 
-	char *start = 0;
-
-	if ((start = (char*) strstr(buffer, "?enable=")) != 0)
-		enable = true;
-	else if ((start = (char*) strstr(buffer, "?disable=")) != 0)
-		disable = true;
-
-	if (enable)
+	while (pos <= query.size())
 	{
-		for (unsigned int i = 0; i < EntryTotalCount; ++i)
-			EntryEnabled[i] = false;
-	}
-	else
-	{
-		for (unsigned int i = 0; i < EntryTotalCount; ++i)
-			EntryEnabled[i] = true;
-	}
+		size_t amp = query.find('&', pos);
 
-	if ((enable) || (disable))
-	{
-		start = (char*) strstr(start, "=");
-		char *end = (char*) strstr(start, " ");
+		if (amp == std::string::npos)
+			amp = query.size();
 
-		if ((start != 0) && (end != 0))
+		std::string param = query.substr(pos, amp - pos);
+
+		pos = amp + 1;
+
+		EntryFilter::Mode mode = EntryFilter::All;
+		std::string list;
+
+		if (param.compare(0, 7, "enable=") == 0)
 		{
-			++start;
-			*end = 0;
+			mode = EntryFilter::Enable;
+			list = param.substr(7);
+		}
+		else if (param.compare(0, 8, "disable=") == 0)
+		{
+			mode = EntryFilter::Disable;
+			list = param.substr(8);
+		}
+		else
+		{
+			continue;
+		}
 
-			while (start < end)
+		// "enable" takes precedence over "disable" like before.
+		if ((filter.mode == EntryFilter::Enable) && (mode == EntryFilter::Disable))
+			continue;
+
+		if ((filter.mode == EntryFilter::Disable) && (mode == EntryFilter::Enable))
+			filter.indexes.clear();
+
+		filter.mode = mode;
+
+		size_t i = 0;
+
+		while (i < list.size())
+		{
+			size_t comma = list.find(',', i);
+
+			if (comma == std::string::npos)
+				comma = list.size();
+
+			bool digits = (comma > i);
+			unsigned long long value = 0;
+
+			for (size_t j = i; j < comma; ++j)
 			{
-				int sensorIndex = atoi(start);
+				if ((list[j] < '0') || (list[j] > '9'))
+				{
+					digits = false;
+					break;
+				}
 
-				if (sensorIndex < EntryTotalCount)
-					EntryEnabled[sensorIndex] = enable ? true : false;
+				value = value * 10 + (unsigned long long) (list[j] - '0');
 
-				char *next = (char*) strstr(start, ",");
-
-				if (next != 0)
-					*next = 0;
-				else
-					next = end;
-
-				start = next + 1;
+				if (value > 0xFFFFFFFFull)
+				{
+					digits = false;
+					break;
+				}
 			}
+
+			if (digits)
+				filter.indexes.insert((unsigned int) value);
+
+			i = comma + 1;
 		}
 	}
 }
 
-size_t CreateJson(char **jsonData)
+std::string CreateJson(const EntryFilter &filter)
 {
-	size_t utf8Size = 0;
+	Output out;
 
-	wchar_t *json = 0;
+	unsigned int entryIndex = 0;
 
-	LOG(json = (wchar_t*) malloc(1000000 * sizeof(wchar_t)));
+	bool first = false;
+	bool first_output = true;
 
-	if (json)
+	out.Append("{\n");
+
+	if (Hwinfo)
 	{
-		int entryIndex = 0;
+		HwinfoData hwinfo = {};
 
-		bool first = false;
-		bool first_output = true;
-
-		swprintf(json, L"{\n");
-
-		if (Hwinfo)
+		if (GetHwinfo(hwinfo))
 		{
-			HWINFO_SENSORS_SHARED_MEM2 hwinfo = {0};
+			const HWINFO_SENSORS_SHARED_MEM2 &h = hwinfo.header;
 
-			void *sensors = 0;
-			void *readings = 0;
+			first_output = false;
 
-			if (GetHwinfo(&hwinfo, &sensors, &readings))
+			out.Format(
+				"\t\"hwinfo\":\n"
+				"\t{\n"
+				"\t\t\"signature\": %u,\n"
+				"\t\t\"version\": %u,\n"
+				"\t\t\"revision\": %u,\n"
+				"\t\t\"pollTime\": %lld,\n"
+				"\t\t\"sensorOffset\": %u,\n"
+				"\t\t\"sensorSize\": %u,\n"
+				"\t\t\"sensorCount\": %u,\n"
+				"\t\t\"readingOffset\": %u,\n"
+				"\t\t\"readingSize\": %u,\n"
+				"\t\t\"readingCount\": %u,\n"
+				"\t\t\"sensors\":\n"
+				"\t\t[",
+				h.signature, h.version, h.revision, h.pollTime, h.sensorOffset, h.sensorSize,
+				h.sensorCount, h.readingOffset, h.readingSize, h.readingCount);
+
+			first = true;
+
+			for (unsigned int i = 0; i < h.sensorCount; ++i)
 			{
-				first_output = false;
+				const HWINFO_SENSORS_SENSOR *sensor = (const HWINFO_SENSORS_SENSOR*) (&hwinfo.sensors[0] + (size_t) h.sensorSize * i);
 
-				swprintf(json + wcslen(json),
-						 L"\t\"hwinfo\":\n"
-						 L"\t{\n"
-						 L"\t\t\"signature\": %d,\n"
-						 L"\t\t\"version\": %d,\n"
-						 L"\t\t\"revision\": %d,\n"
-						 L"\t\t\"pollTime\": %lld,\n"
-						 L"\t\t\"sensorOffset\": %d,\n"
-						 L"\t\t\"sensorSize\": %d,\n"
-						 L"\t\t\"sensorCount\": %d,\n"
-						 L"\t\t\"readingOffset\": %d,\n"
-						 L"\t\t\"readingSize\": %d,\n"
-						 L"\t\t\"readingCount\": %d,\n"
-						 L"\t\t\"sensors\":\n"
-						 L"\t\t[",
-						 hwinfo.signature,
-						 hwinfo.version,
-						 hwinfo.revision,
-						 hwinfo.pollTime,
-						 hwinfo.sensorOffset,
-						 hwinfo.sensorSize,
-						 hwinfo.sensorCount,
-						 hwinfo.readingOffset,
-						 hwinfo.readingSize,
-						 hwinfo.readingCount);
-
-				first = true;
-
-				for (unsigned int i = 0; i < hwinfo.sensorCount; ++i)
+				if (filter.IsEnabled(entryIndex))
 				{
-					HWINFO_SENSORS_SENSOR *sensor = (HWINFO_SENSORS_SENSOR*) ((unsigned char*) sensors + hwinfo.sensorSize * i);
+					out.Format(
+						"%s\n"
+						"\t\t\t{\n"
+						"\t\t\t\t\"entryIndex\": %u,\n"
+						"\t\t\t\t\"sensorId\": %u,\n"
+						"\t\t\t\t\"sensorInst\": %u,\n"
+						"\t\t\t\t\"sensorNameOriginal\": \"%s\",\n"
+						"\t\t\t\t\"sensorNameUser\": \"%s\"\n"
+						"\t\t\t}",
+						first ? "" : ",",
+						entryIndex,
+						sensor->sensorId,
+						sensor->sensorInst,
+						EscapeAnsi(sensor->sensorNameOriginal, sizeof(sensor->sensorNameOriginal)).c_str(),
+						EscapeAnsi(sensor->sensorNameUser, sizeof(sensor->sensorNameUser)).c_str());
 
-					if (EntryEnabled[entryIndex])
-					{
-						swprintf(json + wcslen(json),
-								 L"%hs\n"
-								 L"\t\t\t{\n"
-								 L"\t\t\t\t\"entryIndex\": %d,\n"
-								 L"\t\t\t\t\"sensorId\": %u,\n"
-								 L"\t\t\t\t\"sensorInst\": %d,\n"
-								 L"\t\t\t\t\"sensorNameOriginal\": \"%hs\",\n"
-								 L"\t\t\t\t\"sensorNameUser\": \"%hs\"\n"
-								 L"\t\t\t}",
-								 first ? "" : ",",
-								 entryIndex,
-								 sensor->sensorId,
-								 sensor->sensorInst,
-								 FormatSpecialChar(sensor->sensorNameOriginal),
-								 FormatSpecialChar(sensor->sensorNameUser));
-
-						first = false;
-					}
-
-					++entryIndex;
+					first = false;
 				}
 
-				swprintf(json + wcslen(json),
-						 L"\n"
-						 L"\t\t],\n"
-						 L"\t\t\"readings\":\n"
-						 L"\t\t[");
-
-				first = true;
-
-				for (unsigned int i = 0; i < hwinfo.readingCount; ++i)
-				{
-					HWINFO_SENSORS_READING *reading = (HWINFO_SENSORS_READING*) ((unsigned char*) readings + hwinfo.readingSize * i);
-
-					if (EntryEnabled[entryIndex])
-					{
-						char readingValue[64], readingValueMin[64], readingValueMax[64], readingValueAvg[64];
-
-						swprintf(json + wcslen(json),
-								 L"%hs\n"
-								 L"\t\t\t{\n"
-								 L"\t\t\t\t\"entryIndex\": %d,\n"
-								 L"\t\t\t\t\"readingType\": %d,\n"
-								 L"\t\t\t\t\"sensorIndex\": %d,\n"
-								 L"\t\t\t\t\"readingId\": %u,\n"
-								 L"\t\t\t\t\"labelOriginal\": \"%hs\",\n"
-								 L"\t\t\t\t\"labelUser\": \"%hs\",\n"
-								 L"\t\t\t\t\"unit\": \"%hs\",\n"
-								 L"\t\t\t\t\"value\": %hs,\n"
-								 L"\t\t\t\t\"valueMin\": %hs,\n"
-								 L"\t\t\t\t\"valueMax\": %hs,\n"
-								 L"\t\t\t\t\"valueAvg\": %hs\n"
-								 L"\t\t\t}",
-								 first ? "" : ",",
-								 entryIndex,
-								 reading->readingType,
-								 reading->sensorIndex,
-								 reading->readingId,
-								 FormatSpecialChar(reading->labelOriginal),
-								 FormatSpecialChar(reading->labelUser),
-								 FormatSpecialChar(reading->unit),
-								 FormatFloat(reading->value, readingValue),
-								 FormatFloat(reading->valueMin, readingValueMin),
-								 FormatFloat(reading->valueMax, readingValueMax),
-								 FormatFloat(reading->valueAvg, readingValueAvg));
-
-						first = false;
-					}
-
-					++entryIndex;
-				}
-
-				swprintf(json + wcslen(json),
-						 L"\n"
-						 L"\t\t]\n"
-						 L"\t}");
-
-				free(sensors);
-				free(readings);
+				++entryIndex;
 			}
-		}
 
-		if (Gpuz)
-		{
-			GPUZ_SH_MEM gpuz = {0};
+			out.Append(
+				"\n"
+				"\t\t],\n"
+				"\t\t\"readings\":\n"
+				"\t\t[");
 
-			if (GetGpuz(&gpuz))
+			first = true;
+
+			for (unsigned int i = 0; i < h.readingCount; ++i)
 			{
-				if (first_output)
-					first_output = false;
-				else
-					swprintf(json + wcslen(json), L",\n");
+				const HWINFO_SENSORS_READING *reading = (const HWINFO_SENSORS_READING*) (&hwinfo.readings[0] + (size_t) h.readingSize * i);
 
-				swprintf(json + wcslen(json),
-						 L"\t\"gpuz\":\n"
-						 L"\t{\n"
-						 L"\t\t\"version\": %d,\n"
-						 L"\t\t\"busy\": %d,\n"
-						 L"\t\t\"lastUpdate\": %d,\n"
-						 L"\t\t\"data\":\n"
-						 L"\t\t[",
-						 gpuz.version,
-						 gpuz.busy,
-						 gpuz.lastUpdate);
-
-				first = true;
-
-				for (unsigned int i = 0; i < 128; ++i)
+				if (filter.IsEnabled(entryIndex))
 				{
-					if (wcslen(gpuz.data[i].key) > 0)
-					{
-						if (EntryEnabled[entryIndex])
-						{
-							swprintf(json + wcslen(json),
-									 L"%hs\n"
-									 L"\t\t\t{\n"
-									 L"\t\t\t\t\"entryIndex\": %d,\n"
-									 L"\t\t\t\t\"key\": \"%s\",\n"
-									 L"\t\t\t\t\"value\": \"%s\"\n"
-									 L"\t\t\t}",
-									 first ? "" : ",",
-									 entryIndex,
-									 FormatSpecialCharUnicode(gpuz.data[i].key),
-									 FormatSpecialCharUnicode(gpuz.data[i].value));
+					out.Format(
+						"%s\n"
+						"\t\t\t{\n"
+						"\t\t\t\t\"entryIndex\": %u,\n"
+						"\t\t\t\t\"readingType\": %u,\n"
+						"\t\t\t\t\"sensorIndex\": %u,\n"
+						"\t\t\t\t\"readingId\": %u,\n"
+						"\t\t\t\t\"labelOriginal\": \"%s\",\n"
+						"\t\t\t\t\"labelUser\": \"%s\",\n"
+						"\t\t\t\t\"unit\": \"%s\",\n"
+						"\t\t\t\t\"value\": %s,\n"
+						"\t\t\t\t\"valueMin\": %s,\n"
+						"\t\t\t\t\"valueMax\": %s,\n"
+						"\t\t\t\t\"valueAvg\": %s\n"
+						"\t\t\t}",
+						first ? "" : ",",
+						entryIndex,
+						reading->readingType,
+						reading->sensorIndex,
+						reading->readingId,
+						EscapeAnsi(reading->labelOriginal, sizeof(reading->labelOriginal)).c_str(),
+						EscapeAnsi(reading->labelUser, sizeof(reading->labelUser)).c_str(),
+						EscapeAnsi(reading->unit, sizeof(reading->unit)).c_str(),
+						FormatFloat(reading->value).c_str(),
+						FormatFloat(reading->valueMin).c_str(),
+						FormatFloat(reading->valueMax).c_str(),
+						FormatFloat(reading->valueAvg).c_str());
 
-							first = false;
-						}
-
-						++entryIndex;
-					}
+					first = false;
 				}
 
-				swprintf(json + wcslen(json),
-						 L"\n"
-						 L"\t\t],\n"
-						 L"\t\t\"sensors\":\n"
-						 L"\t\t[");
-
-				first = true;
-
-				for (unsigned int i = 0; i < 128; ++i)
-				{
-					if (wcslen(gpuz.sensors[i].name) > 0)
-					{
-						if (EntryEnabled[entryIndex])
-						{
-							char gpuzSensorsValue[64];
-
-							swprintf(json + wcslen(json),
-									 L"%hs\n"
-									 L"\t\t\t{\n"
-									 L"\t\t\t\t\"entryIndex\": %d,\n"
-									 L"\t\t\t\t\"name\": \"%s\",\n"
-									 L"\t\t\t\t\"unit\": \"%s\",\n"
-									 L"\t\t\t\t\"digits\": %d,\n"
-									 L"\t\t\t\t\"value\": %hs\n"
-									 L"\t\t\t}",
-									 first ? "" : ",",
-									 entryIndex,
-									 FormatSpecialCharUnicode(gpuz.sensors[i].name),
-									 FormatSpecialCharUnicode(gpuz.sensors[i].unit),
-									 gpuz.sensors[i].digits,
-									 FormatFloat(gpuz.sensors[i].value, gpuzSensorsValue));
-
-							first = false;
-						}
-
-						++entryIndex;
-					}
-				}
-
-				swprintf(json + wcslen(json),
-						 L"\n"
-						 L"\t\t]\n"
-						 L"\t}");
+				++entryIndex;
 			}
+
+			out.Append(
+				"\n"
+				"\t\t]\n"
+				"\t}");
 		}
-
-		if (Afterburner)
-		{
-			MAHM_SHARED_MEMORY_HEADER afterburner = {0};
-
-			void *entries = 0;
-
-			if (GetAfterburner(&afterburner, &entries))
-			{
-				if (first_output)
-					first_output = false;
-				else
-					swprintf(json + wcslen(json), L",\n");
-
-				swprintf(json + wcslen(json),
-						 L"\t\"afterburner\":\n"
-						 L"\t{\n"
-						 L"\t\t\"signature\": %d,\n"
-						 L"\t\t\"version\": %d,\n"
-						 L"\t\t\"headerSize\": %d,\n"
-						 L"\t\t\"entryCount\": %d,\n"
-						 L"\t\t\"entrySize\": %d,\n"
-						 L"\t\t\"time\": %d,\n"
-						 L"\t\t\"entries\":\n"
-						 L"\t\t[",
-						 afterburner.signature,
-						 afterburner.version,
-						 afterburner.headerSize,
-						 afterburner.entryCount,
-						 afterburner.entrySize,
-						 afterburner.time);
-
-				first = true;
-
-				for (unsigned int i = 0; i < afterburner.entryCount; ++i)
-				{
-					MAHM_SHARED_MEMORY_ENTRY *entry = (MAHM_SHARED_MEMORY_ENTRY*) ((unsigned char*) entries + afterburner.entrySize * i);
-
-					if (EntryEnabled[entryIndex])
-					{
-						entry->format[strlen(entry->format)] = 0;
-
-						unsigned int digits = atoi(entry->format + 2);
-
-						char entryData[64], entryMinLimit[64], entryMaxLimit[64];
-
-						swprintf(json + wcslen(json),
-								 L"%hs\n"
-								 L"\t\t\t{\n"
-								 L"\t\t\t\t\"entryIndex\": %d,\n"
-								 L"\t\t\t\t\"name\": \"%hs\",\n"
-								 L"\t\t\t\t\"units\": \"%hs\",\n"
-								 L"\t\t\t\t\"localName\": \"%hs\",\n"
-								 L"\t\t\t\t\"localUnits\": \"%hs\",\n"
-								 L"\t\t\t\t\"digits\": %d,\n"
-								 L"\t\t\t\t\"data\": %hs,\n"
-								 L"\t\t\t\t\"minLimit\": %hs,\n"
-								 L"\t\t\t\t\"maxLimit\": %hs,\n"
-								 L"\t\t\t\t\"flags\": %d\n"
-								 L"\t\t\t}",
-								 first ? "" : ",",
-								 entryIndex,
-								 FormatSpecialChar(entry->name),
-								 FormatSpecialChar(entry->units),
-								 FormatSpecialChar(entry->localName),
-								 FormatSpecialChar(entry->localUnits),
-								 digits,
-								 FormatFloat(entry->data, entryData),
-								 FormatFloat(entry->minLimit, entryMinLimit),
-								 FormatFloat(entry->maxLimit, entryMaxLimit),
-								 entry->flags);
-
-						first = false;
-					}
-
-					++entryIndex;
-				}
-
-				swprintf(json + wcslen(json),
-						 L"\n"
-						 L"\t\t]\n"
-						 L"\t}");
-
-				free(entries);
-			}
-		}
-
-		swprintf(json + wcslen(json), L"\n}");
-
-		utf8Size = UnicodeToUtf8(json, jsonData);
-
-		free(json);
 	}
 
-	return utf8Size;
+	if (Gpuz)
+	{
+		GPUZ_SH_MEM *gpuz = new GPUZ_SH_MEM;
+
+		if (GetGpuz(*gpuz))
+		{
+			if (first_output)
+				first_output = false;
+			else
+				out.Append(",\n");
+
+			out.Format(
+				"\t\"gpuz\":\n"
+				"\t{\n"
+				"\t\t\"version\": %u,\n"
+				"\t\t\"busy\": %d,\n"
+				"\t\t\"lastUpdate\": %u,\n"
+				"\t\t\"data\":\n"
+				"\t\t[",
+				gpuz->version,
+				(int) gpuz->busy,
+				gpuz->lastUpdate);
+
+			first = true;
+
+			for (unsigned int i = 0; i < 128; ++i)
+			{
+				if (gpuz->data[i].key[0] != L'\0')
+				{
+					if (filter.IsEnabled(entryIndex))
+					{
+						out.Format(
+							"%s\n"
+							"\t\t\t{\n"
+							"\t\t\t\t\"entryIndex\": %u,\n"
+							"\t\t\t\t\"key\": \"%s\",\n"
+							"\t\t\t\t\"value\": \"%s\"\n"
+							"\t\t\t}",
+							first ? "" : ",",
+							entryIndex,
+							EscapeWide(gpuz->data[i].key, 256).c_str(),
+							EscapeWide(gpuz->data[i].value, 256).c_str());
+
+						first = false;
+					}
+
+					++entryIndex;
+				}
+			}
+
+			out.Append(
+				"\n"
+				"\t\t],\n"
+				"\t\t\"sensors\":\n"
+				"\t\t[");
+
+			first = true;
+
+			for (unsigned int i = 0; i < 128; ++i)
+			{
+				if (gpuz->sensors[i].name[0] != L'\0')
+				{
+					if (filter.IsEnabled(entryIndex))
+					{
+						out.Format(
+							"%s\n"
+							"\t\t\t{\n"
+							"\t\t\t\t\"entryIndex\": %u,\n"
+							"\t\t\t\t\"name\": \"%s\",\n"
+							"\t\t\t\t\"unit\": \"%s\",\n"
+							"\t\t\t\t\"digits\": %u,\n"
+							"\t\t\t\t\"value\": %s\n"
+							"\t\t\t}",
+							first ? "" : ",",
+							entryIndex,
+							EscapeWide(gpuz->sensors[i].name, 256).c_str(),
+							EscapeWide(gpuz->sensors[i].unit, 8).c_str(),
+							gpuz->sensors[i].digits,
+							FormatFloat(gpuz->sensors[i].value).c_str());
+
+						first = false;
+					}
+
+					++entryIndex;
+				}
+			}
+
+			out.Append(
+				"\n"
+				"\t\t]\n"
+				"\t}");
+		}
+
+		delete gpuz;
+	}
+
+	if (Afterburner)
+	{
+		AfterburnerData afterburner = {};
+
+		if (GetAfterburner(afterburner))
+		{
+			const MAHM_SHARED_MEMORY_HEADER &h = afterburner.header;
+
+			if (first_output)
+				first_output = false;
+			else
+				out.Append(",\n");
+
+			out.Format(
+				"\t\"afterburner\":\n"
+				"\t{\n"
+				"\t\t\"signature\": %u,\n"
+				"\t\t\"version\": %u,\n"
+				"\t\t\"headerSize\": %u,\n"
+				"\t\t\"entryCount\": %u,\n"
+				"\t\t\"entrySize\": %u,\n"
+				"\t\t\"time\": %d,\n"
+				"\t\t\"entries\":\n"
+				"\t\t[",
+				h.signature, h.version, h.headerSize, h.entryCount, h.entrySize, h.time);
+
+			first = true;
+
+			for (unsigned int i = 0; i < h.entryCount; ++i)
+			{
+				const MAHM_SHARED_MEMORY_ENTRY *entry = (const MAHM_SHARED_MEMORY_ENTRY*) (&afterburner.entries[0] + (size_t) h.entrySize * i);
+
+				if (filter.IsEnabled(entryIndex))
+				{
+					unsigned int digits = 0;
+
+					if (strnlen(entry->format, sizeof(entry->format)) > 2)
+						digits = (unsigned int) atoi(entry->format + 2);
+
+					out.Format(
+						"%s\n"
+						"\t\t\t{\n"
+						"\t\t\t\t\"entryIndex\": %u,\n"
+						"\t\t\t\t\"name\": \"%s\",\n"
+						"\t\t\t\t\"units\": \"%s\",\n"
+						"\t\t\t\t\"localName\": \"%s\",\n"
+						"\t\t\t\t\"localUnits\": \"%s\",\n"
+						"\t\t\t\t\"digits\": %u,\n"
+						"\t\t\t\t\"data\": %s,\n"
+						"\t\t\t\t\"minLimit\": %s,\n"
+						"\t\t\t\t\"maxLimit\": %s,\n"
+						"\t\t\t\t\"flags\": %u\n"
+						"\t\t\t}",
+						first ? "" : ",",
+						entryIndex,
+						EscapeAnsi(entry->name, sizeof(entry->name)).c_str(),
+						EscapeAnsi(entry->units, sizeof(entry->units)).c_str(),
+						EscapeAnsi(entry->localName, sizeof(entry->localName)).c_str(),
+						EscapeAnsi(entry->localUnits, sizeof(entry->localUnits)).c_str(),
+						digits,
+						FormatFloat((double) entry->data).c_str(),
+						FormatFloat((double) entry->minLimit).c_str(),
+						FormatFloat((double) entry->maxLimit).c_str(),
+						entry->flags);
+
+					first = false;
+				}
+
+				++entryIndex;
+			}
+
+			out.Append(
+				"\n"
+				"\t\t]\n"
+				"\t}");
+		}
+	}
+
+	out.Append("\n}");
+
+	return out.text;
+}
+
+std::string MakeResponse(int code, const char *status, const char *contentType, const std::string &body)
+{
+	char header[512];
+
+	_snprintf(header, sizeof(header),
+		"HTTP/1.1 %d %s\r\n"
+		"Content-Type: %s\r\n"
+		"Content-Length: %Iu\r\n"
+		"Cache-Control: no-store\r\n"
+		"Connection: close\r\n"
+		"Access-Control-Allow-Origin: *\r\n"
+		"\r\n",
+		code, status, contentType, (size_t) body.size());
+
+	header[sizeof(header) - 1] = '\0';
+
+	return std::string(header) + body;
+}
+
+bool SendAll(SOCKET socket, const std::string &data)
+{
+	size_t total = 0;
+
+	while (total < data.size())
+	{
+		size_t chunk = data.size() - total;
+
+		if (chunk > 0x100000)
+			chunk = 0x100000;
+
+		int sent = send(socket, data.data() + total, (int) chunk, 0);
+
+		if (sent <= 0)
+			return false;
+
+		total += (size_t) sent;
+	}
+
+	return true;
 }
 
 unsigned long int __stdcall ClientThread(void *parameter)
 {
 	SOCKET clientSocket = (SOCKET) parameter;
 
-	int received = 0, sent = 0;
+	DWORD timeout = ClientTimeoutMs;
 
-	int bufferSize = 1000000;
+	setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*) &timeout, sizeof(timeout));
+	setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, (const char*) &timeout, sizeof(timeout));
 
-	char *buffer = 0;
+	// Read the request header (until the empty line, limited in size).
+	std::string request;
 
-	LOG(buffer = (char*) malloc(bufferSize * sizeof(char)));
+	char chunk[2048];
 
-	if (buffer)
+	while (request.size() < MaxRequestSize)
 	{
-		LOG(received = recv(clientSocket, buffer, bufferSize, 0));
+		int received = recv(clientSocket, chunk, sizeof(chunk), 0);
 
-		if (received > 0)
+		if (received <= 0)
+			break;
+
+		request.append(chunk, (size_t) received);
+
+		if ((request.find("\r\n\r\n") != std::string::npos) || (request.find("\n\n") != std::string::npos))
+			break;
+	}
+
+	LOG(request.size());
+
+	if (!request.empty())
+	{
+		// Request line: METHOD SP TARGET SP VERSION
+		size_t lineEnd = request.find_first_of("\r\n");
+
+		std::string line = request.substr(0, lineEnd);
+
+		printf("%s\n", JsonEscape(line).c_str());
+
+		std::string method, target;
+
+		size_t space1 = line.find(' ');
+
+		if (space1 != std::string::npos)
 		{
-			buffer[received] = 0;
+			method = line.substr(0, space1);
 
-			printf(buffer);
+			size_t space2 = line.find(' ', space1 + 1);
 
-			size_t size = 0;
-
-			if ((strstr(buffer, "GET /json ") != 0) || (strstr(buffer, "GET /json?") != 0) ||
-				(strstr(buffer, "GET /json.json ") != 0) || (strstr(buffer, "GET /json.json?") != 0))
-			{
-				ParseParams(buffer);
-
-				char *jsonData = 0;
-
-				size_t jsonSize = CreateJson(&jsonData);
-
-				sprintf(buffer, JsonHeader, jsonSize);
-
-				size = strlen(buffer);
-
-				if (jsonSize > 0)
-				{
-					memcpy(buffer + size, jsonData, jsonSize);
-
-					free(jsonData);
-
-					size += jsonSize;
-				}
-
-				buffer[size] = 0;
-
-				printf(JsonHeader, jsonSize);
-			}
-			else if ((strstr(buffer, "GET / ") != 0) || (strstr(buffer, "GET /?") != 0) ||
-				(strstr(buffer, "GET /index.html ") != 0) || (strstr(buffer, "GET /index.html?") != 0))
-			{
-				sprintf(buffer, HtmlIndexHeader, HtmlIndexSize);
-
-				size = strlen(buffer);
-
-				if (HtmlIndexSize > 0)
-				{
-					memcpy(buffer + size, HtmlIndexData, HtmlIndexSize);
-
-					size += HtmlIndexSize;
-				}
-
-				buffer[size] = 0;
-
-				printf(HtmlIndexHeader, HtmlIndexSize);
-			}
-			else
-			{
-				sprintf(buffer, HtmlNotFoundHeader, HtmlNotFoundSize);
-
-				size = strlen(buffer);
-
-				if (HtmlNotFoundSize > 0)
-				{
-					memcpy(buffer + size, HtmlNotFoundData, HtmlNotFoundSize);
-
-					size += HtmlNotFoundSize;
-				}
-
-				buffer[size] = 0;
-
-				printf(HtmlNotFoundHeader, HtmlNotFoundSize);
-			}
-
-			LOG(sent = send(clientSocket, buffer, (int) size, 0));
+			target = line.substr(space1 + 1, (space2 == std::string::npos) ? std::string::npos : space2 - space1 - 1);
 		}
 
-		free(buffer);
+		std::string path = target, query;
+
+		size_t question = target.find('?');
+
+		if (question != std::string::npos)
+		{
+			path = target.substr(0, question);
+			query = target.substr(question + 1);
+		}
+
+		std::string response;
+
+		if (method == "GET" && (path == "/json" || path == "/json.json"))
+		{
+			EntryFilter filter;
+
+			ParseQuery(query, filter);
+
+			response = MakeResponse(200, "OK", "application/json; charset=utf-8", CreateJson(filter));
+		}
+		else if (method == "GET" && (path == "/" || path == "/index.html"))
+		{
+			response = MakeResponse(200, "OK", "text/html; charset=utf-8", HtmlIndexData);
+		}
+		else
+		{
+			response = MakeResponse(404, "Not Found", "text/html; charset=utf-8", HtmlNotFoundData);
+		}
+
+		LOG(SendAll(clientSocket, response));
 	}
 
 	LOG(shutdown(clientSocket, SD_BOTH));
 
 	LOG(closesocket(clientSocket));
 
-	return sent;
+	InterlockedDecrement(&ActiveClients);
+
+	return 0;
 }
 
 void CreateServer()
@@ -954,15 +1114,11 @@ void CreateServer()
 
 	LOG(setlocale(LC_CTYPE, ""));
 
-	HtmlIndexSize = LoadFile("index.html", (void**) &HtmlIndexData);
+	if (!LoadFile("index.html", HtmlIndexData))
+		HtmlIndexData = UnicodeToUtf8(HtmlIndexDataDefault, wcslen(HtmlIndexDataDefault));
 
-	if (HtmlIndexSize == 0)
-		HtmlIndexSize = UnicodeToUtf8(HtmlIndexDataDefault, &HtmlIndexData);
-
-	HtmlNotFoundSize = LoadFile("404.html", (void**) &HtmlNotFoundData);
-
-	if (HtmlNotFoundSize == 0)
-		HtmlNotFoundSize = UnicodeToUtf8(HtmlNotFoundDataDefault, &HtmlNotFoundData);
+	if (!LoadFile("404.html", HtmlNotFoundData))
+		HtmlNotFoundData = UnicodeToUtf8(HtmlNotFoundDataDefault, wcslen(HtmlNotFoundDataDefault));
 
 	WSADATA wsaData = {0};
 
@@ -978,25 +1134,59 @@ void CreateServer()
 
 			serverAddress.sin_family = AF_INET;
 			serverAddress.sin_addr.S_un.S_addr = INADDR_ANY;
-			serverAddress.sin_port = htons(Port);
+			serverAddress.sin_port = htons((unsigned short) Port);
 
-			if (LOG(bind(serverSocket, (sockaddr*) &serverAddress, sizeof(serverAddress))) == 0)
+			if (LOG(bind(serverSocket, (sockaddr*) &serverAddress, sizeof(serverAddress))) != 0)
 			{
-				if (LOG(listen(serverSocket, SOMAXCONN)) == 0)
+				printf("Error: bind to port %u failed (WSA error %d). Port already in use?\n", Port, WSAGetLastError());
+			}
+			else if (LOG(listen(serverSocket, SOMAXCONN)) != 0)
+			{
+				printf("Error: listen failed (WSA error %d).\n", WSAGetLastError());
+			}
+			else
+			{
+				printf("Listening on port %u\n", Port);
+
+				while (true)
 				{
-					while (true)
+					SOCKET clientSocket = INVALID_SOCKET;
+
+					LOG(clientSocket = accept(serverSocket, 0, 0));
+
+					if (clientSocket == INVALID_SOCKET)
 					{
-						SOCKET clientSocket = INVALID_SOCKET;
+						Sleep(10);
 
-						LOG(clientSocket = accept(serverSocket, 0, 0));
+						continue;
+					}
 
-						if (clientSocket != INVALID_SOCKET)
-						{
-							HANDLE clientThread = 0;
+					// Limit the number of simultaneous clients.
+					if (InterlockedIncrement(&ActiveClients) > MaxClients)
+					{
+						InterlockedDecrement(&ActiveClients);
 
-							if (LOG(clientThread = CreateThread(0, 0, ClientThread, (void*) clientSocket, 0, 0)) != 0)
-								LOG(CloseHandle(clientThread));
-						}
+						SendAll(clientSocket, MakeResponse(503, "Service Unavailable", "text/plain; charset=utf-8", "503 Service Unavailable"));
+
+						shutdown(clientSocket, SD_BOTH);
+						closesocket(clientSocket);
+
+						continue;
+					}
+
+					HANDLE clientThread = 0;
+
+					LOG(clientThread = CreateThread(0, 0, ClientThread, (void*) clientSocket, 0, 0));
+
+					if (clientThread != 0)
+					{
+						LOG(CloseHandle(clientThread));
+					}
+					else
+					{
+						InterlockedDecrement(&ActiveClients);
+
+						closesocket(clientSocket);
 					}
 				}
 			}
@@ -1006,12 +1196,6 @@ void CreateServer()
 
 		LOG(WSACleanup());
 	}
-
-	if (HtmlIndexData)
-		free(HtmlIndexData);
-
-	if (HtmlNotFoundData)
-		free(HtmlNotFoundData);
 }
 
 void PrintUsage()
@@ -1033,63 +1217,101 @@ void PrintUsage()
 		"http://ip:port/404.html (UTF-8)\n");
 }
 
-void ParseArgs(int argc, char *argv[])
+// Returns false if the program should exit right away (-help or invalid arguments).
+bool ParseArgs(int argc, char *argv[])
 {
 	int arg = 1;
 
 	while (arg < argc)
 	{
-		if (strcmp(strupr(argv[arg]), "-PORT") == 0)
+		const char *name = argv[arg];
+
+		if (_stricmp(name, "-port") == 0)
 		{
 			if (arg + 1 < argc)
-				Port = atoi(argv[++arg]);
+			{
+				long port = atol(argv[++arg]);
+
+				if ((port < 1) || (port > 65535))
+				{
+					printf("Error: invalid port \"%s\" (1-65535).\n", argv[arg]);
+
+					return false;
+				}
+
+				Port = (unsigned int) port;
+			}
 		}
-		else if (strcmp(strupr(argv[arg]), "-HWINFO") == 0)
+		else if (_stricmp(name, "-hwinfo") == 0)
 		{
 			if (arg + 1 < argc)
 				Hwinfo = (atoi(argv[++arg]) != 0);
 		}
-		else if (strcmp(strupr(argv[arg]), "-GPUZ") == 0)
+		else if (_stricmp(name, "-gpuz") == 0)
 		{
 			if (arg + 1 < argc)
 				Gpuz = (atoi(argv[++arg]) != 0);
 		}
-		else if (strcmp(strupr(argv[arg]), "-AFTERBURNER") == 0)
+		else if (_stricmp(name, "-afterburner") == 0)
 		{
 			if (arg + 1 < argc)
 				Afterburner = (atoi(argv[++arg]) != 0);
 		}
-		else if (strcmp(strupr(argv[arg]), "-LOG") == 0)
+		else if (_stricmp(name, "-log") == 0)
 		{
 			if (arg + 1 < argc)
 				LogFileEnable = (atoi(argv[++arg]) != 0);
 		}
-		else if (strcmp(strupr(argv[arg]), "-HELP") == 0)
+		else if (_stricmp(name, "-help") == 0)
 		{
-			Hwinfo = Gpuz = Afterburner = false;
-			LogFileEnable = false;
-
 			PrintUsage();
+
+			return false;
 		}
 
 		++arg;
 	}
+
+	return true;
 }
 
 int main(int argc, char *argv[])
 {
-	if (argc > 1)
-		ParseArgs(argc, argv);
+	if ((argc > 1) && (!ParseArgs(argc, argv)))
+		return EXIT_SUCCESS;
 
 	if ((Hwinfo) || (Gpuz) || (Afterburner))
 	{
+		InitializeCriticalSection(&LogLock);
+
 		if (LogFileEnable)
-			LogFile = fopen("log.txt", "a");
+		{
+			// Simple log rotation: start over if the old log became too big.
+			FILE *old = fopen("log.txt", "rb");
+
+			bool truncate = false;
+
+			if (old)
+			{
+				if ((_fseeki64(old, 0, SEEK_END) == 0) && (_ftelli64(old) > MaxLogFileSize))
+					truncate = true;
+
+				fclose(old);
+			}
+
+			LogFile = fopen("log.txt", truncate ? "w" : "a");
+		}
 
 		CreateServer();
 
 		if (LogFile)
+		{
 			fclose(LogFile);
+
+			LogFile = 0;
+		}
+
+		DeleteCriticalSection(&LogLock);
 	}
 
 	return EXIT_SUCCESS;
