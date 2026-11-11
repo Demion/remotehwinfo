@@ -22,30 +22,30 @@
 			}
 
 			thead td {
-				font-size: 20;
+				font-size: 20px;
 			}
 
 			td {
 				padding: 10px;
 				border-bottom: 1px solid #555;
-				font-size: 14;
+				font-size: 14px;
 			}
 
 			#category td{
 				background-color: #333;
-				font-size: 17;
+				font-size: 17px;
 			}
 
 			thead tr:hover {
-				background-color: #444 !important;;
-				color: #fff !important;;
-				font-size: 20;
+				background-color: #444 !important;
+				color: #fff !important;
+				font-size: 20px;
 			}
 
 			tr:hover:not(#category) {
 				background-color: #999;
 				color: #000;
-				font-size: 14.5;
+				font-size: 14.5px;
 				font-weight: bold;
 			}
 
@@ -60,177 +60,225 @@
 		<div id="hwinfo"></div>
 		<div id="gpuz"></div>
 		<div id="afterburner"></div>
-		<div id="checkboxContainer"><input type="checkbox" id="auotRefreshCheckbox"> Auto Refresh</div>
+		<div id="checkboxContainer"><input type="checkbox" id="autoRefreshCheckbox"> Auto Refresh</div>
 		<script>
 				function AddCommas(str)
 				{
-					return str.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+					var parts = String(str).split('.');
+
+					parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
+					return parts.join('.');
 				}
 
-				function fetchMetrics() {
+				function Esc(value)
+				{
+					return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+				}
+
+				function Num(value, digits)
+				{
+					var number = parseFloat(value);
+
+					if (!isFinite(number))
+						return String(value);
+
+					return AddCommas(number.toFixed(digits));
+				}
+
+				var interval = null;
+				var loading = false;
+
+				function Digits(unit)
+				{
+					switch (unit)
+					{
+						case 'MHz':
+						case 'GT/s':
+						case '\u00b0C':
+						case '%':
+							return 1;
+
+						case 'V':
+						case 'A':
+						case 'W':
+						case 'KB/s':
+						case 'MB/s':
+							return 3;
+					}
+
+					return 0;
+				}
+
+				function YesNo(value)
+				{
+					return (parseFloat(value) == 0) ? 'No' : 'Yes';
+				}
+
+				function RenderHwinfo(hwinfo)
+				{
+					var html = '<table width="1050" style="table-layout:fixed;">';
+					html += '<thead><tr><td align="left"><b>Sensor</b></td>';
+					html += '<td align="right"><b>Current</b></td>';
+					html += '<td align="right"><b>Minimum</b></td>';
+					html += '<td align="right"><b>Maximum</b></td>';
+					html += '<td align="right"><b>Average</b></td></tr></thead>';
+
+					// Sensors are the first entries, so entryIndex == sensorIndex.
+					var sensorNames = {};
+
+					for (var j = 0; j < hwinfo.sensors.length; ++j)
+						sensorNames[parseInt(hwinfo.sensors[j].entryIndex)] = hwinfo.sensors[j].sensorNameUser;
+
+					var sensorIndex = -1;
+
+					for (var i = 0; i < hwinfo.readings.length; ++i)
+					{
+						var reading = hwinfo.readings[i];
+
+						if (sensorIndex != parseInt(reading.sensorIndex))
+						{
+							sensorIndex = parseInt(reading.sensorIndex);
+
+							if (sensorNames.hasOwnProperty(sensorIndex))
+								html += '<tr id="category"><td colspan="5"><b>' + Esc(sensorNames[sensorIndex]) + '</b></td></tr>';
+						}
+
+						var digits = Digits(reading.unit);
+						var unit = Esc(reading.unit);
+
+						html += '<tr><td align="left">' + Esc(reading.labelUser) + '</td>';
+
+						if (reading.unit == 'Yes/No')
+						{
+							html += '<td align="right">' + YesNo(reading.value) + '</td>';
+							html += '<td align="right">' + YesNo(reading.valueMin) + '</td>';
+							html += '<td align="right">' + YesNo(reading.valueMax) + '</td>';
+							html += '<td align="right">' + YesNo(reading.valueAvg) + '</td></tr>';
+						}
+						else
+						{
+							html += '<td align="right">' + Num(reading.value, digits) + ' ' + unit + '</td>';
+							html += '<td align="right">' + Num(reading.valueMin, digits) + ' ' + unit + '</td>';
+							html += '<td align="right">' + Num(reading.valueMax, digits) + ' ' + unit + '</td>';
+							html += '<td align="right">' + Num(reading.valueAvg, digits) + ' ' + unit + '</td></tr>';
+						}
+					}
+
+					html += '</table>';
+
+					document.getElementById("hwinfo").innerHTML = html;
+				}
+
+				function RenderGpuz(gpuz)
+				{
+					var html = '<br><table width="1050" style="table-layout:fixed;">';
+					html += '<tr><td align="left" width="250"><b>GPU-Z</b></td>';
+					html += '<td width="350"></td><td width="150"></td><td width="150"></td><td width="150"></td></tr>';
+					html += '<tr><td align="left"><b>Sensor</b></td>';
+					html += '<td align="right"><b>Current</b></td><td></td><td></td><td></td></tr>';
+
+					for (var i = 0; i < gpuz.data.length; ++i)
+					{
+						if ((gpuz.data[i].key.length > 0) && (gpuz.data[i].value.length > 0))
+						{
+							html += '<tr><td align="left">' + Esc(gpuz.data[i].key) + '</td>';
+							html += '<td align="right">' + Esc(gpuz.data[i].value) + '</td><td></td><td></td><td></td></tr>';
+						}
+					}
+
+					for (var i = 0; i < gpuz.sensors.length; ++i)
+					{
+						var unit = String(gpuz.sensors[i].unit).replace('%%', '%');
+						var digits = Math.min(Math.max(parseInt(gpuz.sensors[i].digits) || 0, 0), 20);
+
+						html += '<tr><td align="left">' + Esc(gpuz.sensors[i].name) + '</td>';
+						html += '<td align="right">' + Num(gpuz.sensors[i].value, digits).replace(/,/g, '');
+						html += ' ' + Esc(unit) + '</td><td></td><td></td><td></td></tr>';
+					}
+
+					html += '</table>';
+
+					document.getElementById("gpuz").innerHTML = html;
+				}
+
+				function RenderAfterburner(afterburner)
+				{
+					var html = '<br><table width="1050" style="table-layout:fixed;">';
+					html += '<tr><td align="left" width="250"><b>MSI Afterburner</b></td>';
+					html += '<td width="350"></td><td width="150"></td><td width="150"></td><td width="150"></td></tr>';
+					html += '<tr><td align="left"><b>Sensor</b></td>';
+					html += '<td align="right"><b>Current</b></td>';
+					html += '<td align="right"><b>Minimum Limit</b></td>';
+					html += '<td align="right"><b>Maximum Limit</b></td><td></td></tr>';
+
+					for (var i = 0; i < afterburner.entries.length; ++i)
+					{
+						var entry = afterburner.entries[i];
+						var digits = Math.min(Math.max(parseInt(entry.digits) || 0, 0), 20);
+						var unit = Esc(entry.localUnits);
+
+						// Not available values (NaN / Infinity / FLT_MAX) are shown as 0.
+						var data = parseFloat(entry.data);
+
+						if ((!isFinite(data)) || (Math.abs(data) > 3.4e+38))
+							data = 0;
+
+						html += '<tr><td align="left">' + Esc(entry.localName) + '</td>';
+						html += '<td align="right">' + data.toFixed(digits) + ' ' + unit + '</td>';
+						html += '<td align="right">' + Num(entry.minLimit, digits).replace(/,/g, '') + ' ' + unit + '</td>';
+						html += '<td align="right">' + Num(entry.maxLimit, digits).replace(/,/g, '') + ' ' + unit + '</td><td></td></tr>';
+					}
+
+					html += '</table>';
+
+					document.getElementById("afterburner").innerHTML = html;
+				}
+
+				function fetchMetrics()
+				{
+					// Do not start a new request while the previous one is still running.
+					if (loading)
+						return;
+
+					loading = true;
 
 					var xmlHttp = new XMLHttpRequest();
 
 					xmlHttp.open('GET', '/json.json', true);
+					xmlHttp.timeout = 5000;
 
 					xmlHttp.onreadystatechange = function()
 					{
-						if ((this.readyState == 4) && (this.status == 200))
+						if (this.readyState != 4)
+							return;
+
+						loading = false;
+
+						if (this.status != 200)
+							return;
+
+						var json;
+
+						try
 						{
-							var json = JSON.parse(this.responseText);
-
-							if (json.hasOwnProperty('hwinfo'))
-							{
-								var html = '<table width="1050" style="table-layout:fixed;">';
-								html += '<thead><tr><td align="left"><b>Sensor</b></td>';
-								html += '<td align="right"><b>Current</b></td>';
-								html += '<td align="right"><b>Minimum</b></td>';
-								html += '<td align="right"><b>Maximum</b></td>';
-								html += '<td align="right"><b>Average</b></td></tr></thead>';
-
-								var sensorIndex = -1;
-
-								for (var i = 0; i < json.hwinfo.readings.length; ++i)
-								{
-									if (sensorIndex != parseInt(json.hwinfo.readings[i].sensorIndex))
-									{
-										sensorIndex = parseInt(json.hwinfo.readings[i].sensorIndex);
-
-										var entryIndexBase = 0;
-
-										for (var j = 0; j < json.hwinfo.sensors.length; ++j)
-										{
-											if ((parseInt(json.hwinfo.sensors[j].entryIndex) + entryIndexBase) == sensorIndex)
-											{
-												html += '<tr id="category"><td colspan="5"><b>' + json.hwinfo.sensors[j].sensorNameUser + '</b></td></tr>';
-
-												break;
-											}
-										}
-									}
-
-									var digits = 0;
-
-									switch (json.hwinfo.readings[i].unit)
-									{
-										case 'MHz':
-										case 'GT/s':
-										case '°C':
-										case '%':
-
-											digits = 1;
-
-											break;
-
-										case 'V':
-										case 'A':
-										case 'W':
-										case 'KB/s':
-										case 'MB/s':
-
-											digits = 3;
-
-											break;
-									}
-
-									html += '<tr><td align="left">' + json.hwinfo.readings[i].labelUser + '</td>';
-
-									if (json.hwinfo.readings[i].unit == 'Yes/No')
-									{
-										html += '<td align="right">' + ((parseFloat(json.hwinfo.readings[i].value) == 0) ? 'No' : 'Yes') + '</td>';
-
-										html += '<td align="right">' + ((parseFloat(json.hwinfo.readings[i].valueMin) == 0) ? 'No' : 'Yes') + '</td>';
-
-										html += '<td align="right">' + ((parseFloat(json.hwinfo.readings[i].valueMax) == 0) ? 'No' : 'Yes') + '</td>';
-
-										html += '<td align="right">' + ((parseFloat(json.hwinfo.readings[i].valueAvg) == 0) ? 'No' : 'Yes') + '</td></tr>';
-									}
-									else
-									{
-										html += '<td align="right">';
-										html += AddCommas(parseFloat(json.hwinfo.readings[i].value).toFixed(digits)) + ' ' + json.hwinfo.readings[i].unit + '</td>';
-
-										html += '<td align="right">';
-										html += AddCommas(parseFloat(json.hwinfo.readings[i].valueMin).toFixed(digits)) + ' ' + json.hwinfo.readings[i].unit + '</td>';
-
-										html += '<td align="right">';
-										html += AddCommas(parseFloat(json.hwinfo.readings[i].valueMax).toFixed(digits)) + ' ' + json.hwinfo.readings[i].unit + '</td>';
-
-										html += '<td align="right">';
-										html += AddCommas(parseFloat(json.hwinfo.readings[i].valueAvg).toFixed(digits)) + ' ' + json.hwinfo.readings[i].unit + '</td></tr>';
-									}
-								}
-
-								html += '</table>';
-
-								document.getElementById("hwinfo").innerHTML = html;
-							}
-
-							if (json.hasOwnProperty('gpuz'))
-							{
-								var html = '<br><table width="1050" style="table-layout:fixed;">';
-								html += '<tr><td align="left" width="250"><b>GPU-Z</b></td>';
-								html += '<td width="350"></td><td width="150"></td><td width="150"></td><td width="150"></td></tr>';
-								html += '<tr><td align="left"><b>Sensor</b></td>';
-								html += '<td align="right"><b>Current</b></td><td></td><td></td><td></td></tr>';
-
-								for (var i = 0; i < json.gpuz.data.length; ++i)
-								{
-									if ((json.gpuz.data[i].key.length > 0) && (json.gpuz.data[i].value.length > 0))
-									{
-										html += '<tr><td align="left">' + json.gpuz.data[i].key + '</td>';
-										html += '<td align="right">' + json.gpuz.data[i].value + '</td><td></td><td></td><td></td></tr>';
-									}
-								}
-
-								for (var i = 0; i < json.gpuz.sensors.length; ++i)
-								{
-									html += '<tr><td align="left">' + json.gpuz.sensors[i].name + '</td>';
-
-									if (json.gpuz.sensors[i].unit.indexOf('%%') != -1)
-										json.gpuz.sensors[i].unit = json.gpuz.sensors[i].unit.replace('%%', '%');
-
-									html += '<td align="right">' + parseFloat(json.gpuz.sensors[i].value).toFixed(parseInt(json.gpuz.sensors[i].digits));
-									html += ' ' + json.gpuz.sensors[i].unit + '</td><td></td><td></td><td></td></tr>';
-								}
-
-								html += '</table>';
-
-								document.getElementById("gpuz").innerHTML = html;
-							}
-
-							if (json.hasOwnProperty('afterburner'))
-							{
-								var html = '<br><table width="1050" style="table-layout:fixed;">';
-								html += '<tr><td align="left" width="250"><b>MSI Afterburner</b></td>';
-								html += '<td width="350"></td><td width="150"></td><td width="150"></td><td width="150"></td></tr>';
-								html += '<tr><td align="left"><b>Sensor</b></td>';
-								html += '<td align="right"><b>Current</b></td>';
-								html += '<td align="right"><b>Minimum Limit</b></td>';
-								html += '<td align="right"><b>Maximum Limit</b></td><td></td></tr>';
-
-								for (var i = 0; i < json.afterburner.entries.length; ++i)
-								{
-									html += '<tr><td align="left">' + json.afterburner.entries[i].localName + '</td>';
-
-									if ((parseFloat(json.afterburner.entries[i].data) > 3.4e+38) || (parseFloat(json.afterburner.entries[i].data) < 1.1e-38))
-										json.afterburner.entries[i].data = 0;
-
-									html += '<td align="right">' + parseFloat(json.afterburner.entries[i].data).toFixed(json.afterburner.entries[i].digits);
-									html += ' ' + json.afterburner.entries[i].localUnits + '</td>';
-
-									html += '<td align="right">' + parseFloat(json.afterburner.entries[i].minLimit).toFixed(json.afterburner.entries[i].digits);
-									html += ' ' + json.afterburner.entries[i].localUnits + '</td>';
-
-									html += '<td align="right">' + parseFloat(json.afterburner.entries[i].maxLimit).toFixed(json.afterburner.entries[i].digits);
-									html += ' ' + json.afterburner.entries[i].localUnits + '</td><td></td></tr>';
-								}
-
-								html += '</table>';
-
-								document.getElementById("afterburner").innerHTML = html;
-							}
+							json = JSON.parse(this.responseText);
 						}
+						catch (e)
+						{
+							console.error('Invalid JSON', e);
+
+							return;
+						}
+
+						if (json.hasOwnProperty('hwinfo'))
+							RenderHwinfo(json.hwinfo);
+
+						if (json.hasOwnProperty('gpuz'))
+							RenderGpuz(json.gpuz);
+
+						if (json.hasOwnProperty('afterburner'))
+							RenderAfterburner(json.afterburner);
 					};
 
 					xmlHttp.send();
@@ -238,13 +286,17 @@
 
 				fetchMetrics();
 
-				const auotRefreshCheckbox = document.getElementById('auotRefreshCheckbox');
-				auotRefreshCheckbox.addEventListener('change', function() {
-					if (this.checked) {
-						interval = setInterval(fetchMetrics, 1000);
-					} else {
+				var autoRefreshCheckbox = document.getElementById('autoRefreshCheckbox');
+
+				autoRefreshCheckbox.addEventListener('change', function() {
+					if (interval !== null)
+					{
 						clearInterval(interval);
+						interval = null;
 					}
+
+					if (this.checked)
+						interval = setInterval(fetchMetrics, 1000);
 				});
 		</script>
 	</body>

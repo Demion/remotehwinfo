@@ -1,5 +1,8 @@
 ### Changelog:
 
+- **unreleased**
+  * Security/stability fixes: bounds-checked shared memory and HTTP handling, proper JSON escaping, request limits/timeouts, `Content-Length`, no entry limit.
+  * index.html: escape HTML (XSS), CSS units, safer refresh.
 - **v0.5** - [RemoteHWInfo v0.5](https://github.com/Demion/remotehwinfo/releases/download/v0.5/RemoteHWInfo_v0.5.zip)
   * Fix bug in json.
 - **v0.4** - [RemoteHWInfo v0.4](https://github.com/Demion/remotehwinfo/releases/download/v0.4/RemoteHWInfo_v0.4.zip)
