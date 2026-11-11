@@ -1,0 +1,50 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: c-cpp
+            os: windows-latest
+            build-mode: manual
+          - language: javascript-typescript
+            os: ubuntu-latest
+            build-mode: none
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-and-quality
+
+      - if: matrix.language == 'c-cpp'
+        uses: microsoft/setup-msbuild@v2
+
+      - if: matrix.language == 'c-cpp'
+        name: Build
+        run: msbuild remotehwinfo.sln /m /p:Configuration=Release /p:Platform=x64 /v:minimal
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}
